@@ -291,8 +291,14 @@ const App = (() => {
   }
 
   // =============================================================
-  //  CANVAS EVENTS
+  //  CANVAS EVENTS — OPTIMIZED: throttle drawing events
   // =============================================================
+  let lastDrawEmit = 0;
+  let lastCursorEmit = 0;
+  let lastCursorPos = { x: 0, y: 0 };
+  const DRAW_THROTTLE_MS = 16;     // ~60fps
+  const CURSOR_THROTTLE_MS = 50;   // 20fps для курсоров
+  
   function attachCanvasEvents() {
     S.canvas.addEventListener('mousedown',  onDown);
     S.canvas.addEventListener('mousemove',  onMove);
@@ -310,6 +316,39 @@ const App = (() => {
       y: (cy - r.top)  * (S.canvas.height / r.height),
     };
   }
+  
+  function emitDraw(data) {
+    const now = Date.now();
+    if (now - lastDrawEmit < DRAW_THROTTLE_MS) {
+      // Буферизация для отправки позже
+      if (!S.drawBuffer) S.drawBuffer = [];
+      S.drawBuffer.push(data);
+      return;
+    }
+    lastDrawEmit = now;
+    
+    // Отправка буферизированных данных
+    if (S.drawBuffer && S.drawBuffer.length > 0) {
+      const batch = S.drawBuffer.splice(0, 10);
+      batch.forEach(d => socket.emit('draw', d));
+    }
+    
+    socket.emit('draw', data);
+  }
+  
+  function emitCursorMove(x, y) {
+    const now = Date.now();
+    const dx = x - lastCursorPos.x;
+    const dy = y - lastCursorPos.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    
+    // Отправляем только если прошло 50мс ИЛИ курсор сместился значительно
+    if (now - lastCursorEmit < CURSOR_THROTTLE_MS && dist < 5) return;
+    
+    lastCursorEmit = now;
+    lastCursorPos = { x, y };
+    socket.emit('cursor-move', { x, y });
+  }
 
   function onDown(e) {
     if (S.gameStatus !== 'drawing') return;
@@ -321,7 +360,7 @@ const App = (() => {
       S.lastX = x; S.lastY = y;
       const { color, size } = drawParams();
       drawDot(x, y, color, size);
-      socket.emit('draw', { type: 'dot', x, y, color, size });
+      emitDraw({ type: 'dot', x, y, color, size });
     } else if (S.tool === 'spray') {
       doSpray(x, y);
     } else {
@@ -333,13 +372,13 @@ const App = (() => {
   function onMove(e) {
     const { x, y } = getPos(e.clientX, e.clientY);
     S.lastClientX = e.clientX; S.lastClientY = e.clientY;
-    socket.emit('cursor-move', { x, y });
+    emitCursorMove(x, y);
     if (!S.isDrawing || S.gameStatus !== 'drawing') return;
 
     if (S.tool === 'brush' || S.tool === 'eraser') {
       const { color, size } = drawParams();
       drawLine(S.lastX, S.lastY, x, y, color, size);
-      socket.emit('draw', { type: 'line', x0: S.lastX, y0: S.lastY, x1: x, y1: y, color, size });
+      emitDraw({ type: 'line', x0: S.lastX, y0: S.lastY, x1: x, y1: y, color, size });
       S.lastX = x; S.lastY = y;
     } else if (S.tool === 'spray') {
       doSpray(x, y);
@@ -365,7 +404,7 @@ const App = (() => {
       drawShape(S.ctx, S.tool, S.shapeStart.x, S.shapeStart.y, x, y, color, size, S.filled);
 
       const typeMap = { line: 'straight', rect: 'rect', ellipse: 'ellipse' };
-      socket.emit('draw', {
+      emitDraw({
         type: typeMap[S.tool],
         x0: S.shapeStart.x, y0: S.shapeStart.y, x1: x, y1: y,
         color, size, filled: S.filled,
@@ -491,7 +530,7 @@ const App = (() => {
       drawDot(px, py, color, 2);
       pts.push({ x: px, y: py });
     }
-    socket.emit('draw', { type: 'spray', points: pts, color, size: 2 });
+    emitDraw({ type: 'spray', points: pts, color, size: 2 });
   }
 
   /** Воспроизведение одного события рисования */
@@ -792,8 +831,14 @@ const App = (() => {
     showOverlay('overlay-finished');
   });
 
-  // Штрих от другого игрока
+  // Штрих от другого игрока — OPTIMIZED: batch processing
   socket.on('draw', (data) => { renderDrawEvent(data); });
+  
+  // Обработка пакетной отрисовки
+  socket.on('draw-batch', (batch) => {
+    if (!S.ctx || !Array.isArray(batch)) return;
+    batch.forEach(d => renderDrawEvent(d));
+  });
 
   socket.on('cursor-move', ({ id, name, color, x, y }) => {
     if (S.canvas) updateCursor(id, name, color, x, y);
