@@ -1,6 +1,5 @@
 // =============================================================
 //  script.js — DrawTogether v2
-//  Машина состояний: lobby → waiting_word → drawing → grading → ... → finished
 // =============================================================
 
 const App = (() => {
@@ -11,48 +10,59 @@ const App = (() => {
   //  СОСТОЯНИЕ
   // =============================================================
   const S = {
-    role:         null,      // 'admin' | 'player'
+    role:         null,
     roomId:       null,
     myName:       null,
     myColor:      null,
-    gameStatus:   null,      // 'lobby'|'waiting_word'|'drawing'|'grading'|'finished'
+    gameStatus:   null,
     currentRound: 0,
     totalRounds:  3,
-    word:         null,      // только учитель знает
-    hint:         null,
+    word:         null,
     allowEraser:  true,
     grades:       [],
 
     // Canvas
-    canvas:       null,
-    ctx:          null,
-    isDrawing:    false,
-    lastX:        0,
-    lastY:        0,
-    tool:         'brush',
-    brushColor:   '#1a1a1a',
-    brushSize:    6,
+    canvas:        null,
+    ctx:           null,
+    previewCanvas: null,
+    previewCtx:    null,
+    isDrawing:     false,
+    lastX: 0, lastY: 0,
+    lastClientX: undefined, lastClientY: undefined,
+    shapeStart:    null,
 
-    // Timer (client-side countdown)
-    timerTotal:   60,
-    timerLeft:    60,
-    timerInterval:null,
+    // Tools
+    tool:       'brush',
+    brushColor: '#1a1a1a',
+    brushSize:  6,
+    filled:     false,
 
-    // Settings (admin local state for lobby)
+    // Timer — FIX: используем Date.now() вместо счётчика
+    timerTotal:    60,
+    timerStartAt:  null,
+    timerStartLeft:60,
+    timerInterval: null,
+
+    // Settings (admin)
     settings: {
       totalRounds: 3,
       roundTime:   60,
       autoClean:   true,
-      showHint:    false,
+      showWord:    false,
       allowEraser: true,
       canvasColor: '#ffffff',
       canvasWidth: 900,
       canvasHeight:600,
     },
+
+    // FIX: флаг против повторного навешивания слушателей
+    _toolbarBound: false,
   };
 
-  // Курсоры других игроков { socketId: HTMLElement }
   const cursors = {};
+
+  // Инструменты в порядке добавления в тулбар
+  const TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'spray'];
 
   // =============================================================
   //  НАВИГАЦИЯ
@@ -65,7 +75,6 @@ const App = (() => {
   function goAdminSetup() { showScreen('screen-admin-setup'); }
   function goJoin()       { showScreen('screen-join'); }
 
-  // ── Если ?room=XXX в URL → сразу открыть форму входа
   (() => {
     const p = new URLSearchParams(window.location.search);
     const r = p.get('room');
@@ -73,7 +82,7 @@ const App = (() => {
   })();
 
   // =============================================================
-  //  ADMIN: выбор пресета холста
+  //  ADMIN: пресет холста
   // =============================================================
   function pickPreset(btn) {
     document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
@@ -94,7 +103,6 @@ const App = (() => {
       S.roomId = res.roomId;
       S.role   = 'admin';
       document.getElementById('display-room-id').textContent = res.roomId;
-      // Sync color swatch
       updateColorSwatch(S.settings.canvasColor);
       showScreen('screen-admin-lobby');
     });
@@ -108,13 +116,13 @@ const App = (() => {
   }
 
   // =============================================================
-  //  ADMIN: чтение настроек из UI и отправка на сервер
+  //  ADMIN: настройки
   // =============================================================
   function syncSettings() {
     const s = S.settings;
     s.roundTime   = +document.getElementById('s-roundTime').value;
     s.autoClean   = document.getElementById('s-autoClean').checked;
-    s.showHint    = document.getElementById('s-showHint').checked;
+    s.showWord    = document.getElementById('s-showWord').checked;
     s.allowEraser = document.getElementById('s-allowEraser').checked;
     s.canvasColor = document.getElementById('s-canvasColor').value;
     updateColorSwatch(s.canvasColor);
@@ -128,7 +136,6 @@ const App = (() => {
     if (hex_) hex_.textContent    = hex;
   }
 
-  /** Изменить числовое поле настроек (раунды) */
   function adjustSetting(key, delta) {
     const limits = { totalRounds: [1, 10] };
     const [mn, mx] = limits[key] || [1, 999];
@@ -139,16 +146,13 @@ const App = (() => {
   }
 
   // =============================================================
-  //  ADMIN: старт игры (переход к вводу слова)
+  //  ADMIN: игровые действия
   // =============================================================
   function startGame() {
     syncSettings();
     socket.emit('start-game');
   }
 
-  // =============================================================
-  //  ADMIN: начать раунд (отправить слово)
-  // =============================================================
   function startRound() {
     const word = document.getElementById('word-input').value.trim();
     if (!word) { toast('Введи слово для раунда!', 'error'); return; }
@@ -156,29 +160,17 @@ const App = (() => {
     socket.emit('start-round', { word });
   }
 
-  /** Досрочная остановка раунда */
-  function stopRound() {
-    socket.emit('stop-round');
-  }
+  function stopRound() { socket.emit('stop-round'); }
 
-  // =============================================================
-  //  ADMIN: поставить оценку
-  // =============================================================
   function giveGrade(grade) {
     socket.emit('give-grade', { grade });
-
     const text = grade === null ? 'без оценки' : `${grade} ${'⭐'.repeat(grade)}`;
     document.getElementById('grade-given-text').textContent = text;
     document.getElementById('grade-given-display').classList.remove('hidden');
-
-    // Обновить кнопки
-    document.querySelectorAll('.grade-btn').forEach(b => b.style.opacity = '.4');
+    document.querySelectorAll('.grade-btn').forEach(b => b.style.opacity = '.35');
   }
 
-  /** Следующий раунд или конец */
-  function nextRound() {
-    socket.emit('next-round');
-  }
+  function nextRound() { socket.emit('next-round'); }
 
   // =============================================================
   //  PLAYER: войти в комнату
@@ -202,18 +194,16 @@ const App = (() => {
       S.totalRounds = res.settings?.totalRounds ?? 3;
 
       if (res.status === 'drawing') {
-        // Опоздал — игра уже идёт
         initGameScreen(res.settings);
         replayHistory(res.drawHistory);
         showOverlay(null);
         startClientTimer(res.remaining ?? res.settings.roundTime, res.settings.roundTime);
         setRoundInfo(res.currentRound, S.totalRounds);
-        if (res.hint) showHint(res.hint);
+        if (res.word) showWordBadge(res.word);
       } else if (res.status === 'grading') {
         initGameScreen(res.settings);
         showGradingOverlay(res.currentRound, S.totalRounds, null);
       } else {
-        // Лобби или waiting_word
         document.getElementById('lobby-greeting').textContent = `Привет, ${name}! 👋`;
         showScreen('screen-player-lobby');
       }
@@ -221,20 +211,24 @@ const App = (() => {
   }
 
   // =============================================================
-  //  ИНИЦИАЛИЗАЦИЯ ЭКРАНА ИГРЫ
-  //  Вызывается один раз при переходе admin/player на game screen
+  //  ИНИЦИАЛИЗАЦИЯ ИГРОВОГО ЭКРАНА
   // =============================================================
   function initGameScreen(settings) {
     showScreen('screen-game');
 
-    S.canvas      = document.getElementById('main-canvas');
-    S.ctx         = S.canvas.getContext('2d');
+    S.canvas       = document.getElementById('main-canvas');
+    S.ctx          = S.canvas.getContext('2d');
+    S.previewCanvas = document.getElementById('preview-canvas');
+    S.previewCtx   = S.previewCanvas.getContext('2d');
+
     S.canvas.width  = settings.canvasWidth;
     S.canvas.height = settings.canvasHeight;
-    S.totalRounds   = settings.totalRounds;
-    S.allowEraser   = settings.allowEraser;
+    S.previewCanvas.width  = settings.canvasWidth;
+    S.previewCanvas.height = settings.canvasHeight;
 
-    // Залить фон
+    S.totalRounds = settings.totalRounds;
+    S.allowEraser = settings.allowEraser;
+
     fillBackground(settings.canvasColor || '#ffffff');
 
     if (S.role === 'admin') {
@@ -242,25 +236,24 @@ const App = (() => {
       document.getElementById('ta-round').textContent = `Раунд — / ${settings.totalRounds}`;
     } else {
       document.getElementById('toolbar-player').classList.remove('hidden');
-      // Цвет и имя игрока
       document.getElementById('brush-color').value = S.myColor;
       S.brushColor = S.myColor;
       const badge = document.getElementById('player-badge');
       badge.textContent           = S.myName;
       badge.style.backgroundColor = S.myColor;
+      if (!S.allowEraser) document.getElementById('btn-eraser').style.display = 'none';
 
-      // Ластик: если запрещён — скрыть кнопку
-      if (!S.allowEraser) {
-        document.getElementById('btn-eraser').style.display = 'none';
+      // FIX: навешиваем слушатели только один раз
+      if (!S._toolbarBound) {
+        S._toolbarBound = true;
+        attachCanvasEvents();
+        initToolbarControls();
       }
-
-      attachCanvasEvents();
-      initToolbarControls();
     }
   }
 
   // =============================================================
-  //  TOOLBAR: слушатели изменений инструментов (ученик)
+  //  TOOLBAR CONTROLS
   // =============================================================
   function initToolbarControls() {
     document.getElementById('brush-color').addEventListener('input', e => {
@@ -270,13 +263,31 @@ const App = (() => {
       S.brushSize = +e.target.value;
       document.getElementById('size-val').textContent = S.brushSize;
     });
+    document.getElementById('shape-filled').addEventListener('change', e => {
+      S.filled = e.target.checked;
+    });
   }
 
   function setTool(tool) {
     S.tool = tool;
-    document.getElementById('btn-brush').classList.toggle('active-tool',  tool === 'brush');
-    document.getElementById('btn-eraser').classList.toggle('active-tool', tool === 'eraser');
-    S.canvas.style.cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+
+    // Обновить активную кнопку с анимацией
+    TOOLS.forEach(t => {
+      const btn = document.getElementById(`btn-${t}`);
+      if (btn) btn.classList.toggle('active-tool', t === tool);
+    });
+
+    // Показать/скрыть опцию заливки
+    const shapeOpts = document.getElementById('shape-options');
+    if (shapeOpts) shapeOpts.classList.toggle('hidden', tool !== 'rect' && tool !== 'ellipse');
+
+    // Курсор
+    const cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+    if (S.canvas) S.canvas.style.cursor = cursor;
+
+    // Сбросить незавершённую фигуру при смене инструмента
+    S.shapeStart = null;
+    clearPreviewCanvas();
   }
 
   // =============================================================
@@ -286,10 +297,10 @@ const App = (() => {
     S.canvas.addEventListener('mousedown',  onDown);
     S.canvas.addEventListener('mousemove',  onMove);
     S.canvas.addEventListener('mouseup',    onUp);
-    S.canvas.addEventListener('mouseleave', onUp);
-    S.canvas.addEventListener('touchstart', onTouchDown, { passive: false });
+    S.canvas.addEventListener('mouseleave', onLeave);
+    S.canvas.addEventListener('touchstart', onTouchStart, { passive: false });
     S.canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
-    S.canvas.addEventListener('touchend',   onUp);
+    S.canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
   }
 
   function getPos(cx, cy) {
@@ -301,28 +312,96 @@ const App = (() => {
   }
 
   function onDown(e) {
-    // Блокировать рисование если не идёт раунд
     if (S.gameStatus !== 'drawing') return;
     const { x, y } = getPos(e.clientX, e.clientY);
-    S.isDrawing = true; S.lastX = x; S.lastY = y;
-    const { color, size } = drawParams();
-    drawDot(x, y, color, size);
-    socket.emit('draw', { type: 'dot', x, y, color, size });
+    S.lastClientX = e.clientX; S.lastClientY = e.clientY;
+    S.isDrawing = true;
+
+    if (S.tool === 'brush' || S.tool === 'eraser') {
+      S.lastX = x; S.lastY = y;
+      const { color, size } = drawParams();
+      drawDot(x, y, color, size);
+      socket.emit('draw', { type: 'dot', x, y, color, size });
+    } else if (S.tool === 'spray') {
+      doSpray(x, y);
+    } else {
+      // line / rect / ellipse — начало фигуры
+      S.shapeStart = { x, y };
+    }
   }
 
   function onMove(e) {
     const { x, y } = getPos(e.clientX, e.clientY);
+    S.lastClientX = e.clientX; S.lastClientY = e.clientY;
     socket.emit('cursor-move', { x, y });
     if (!S.isDrawing || S.gameStatus !== 'drawing') return;
-    const { color, size } = drawParams();
-    drawLine(S.lastX, S.lastY, x, y, color, size);
-    socket.emit('draw', { type: 'line', x0: S.lastX, y0: S.lastY, x1: x, y1: y, color, size });
-    S.lastX = x; S.lastY = y;
+
+    if (S.tool === 'brush' || S.tool === 'eraser') {
+      const { color, size } = drawParams();
+      drawLine(S.lastX, S.lastY, x, y, color, size);
+      socket.emit('draw', { type: 'line', x0: S.lastX, y0: S.lastY, x1: x, y1: y, color, size });
+      S.lastX = x; S.lastY = y;
+    } else if (S.tool === 'spray') {
+      doSpray(x, y);
+    } else if (S.shapeStart) {
+      // Превью фигуры на preview-canvas
+      clearPreviewCanvas();
+      const { color, size } = drawParams();
+      drawShape(S.previewCtx, S.tool, S.shapeStart.x, S.shapeStart.y, x, y, color, size, S.filled);
+    }
   }
 
-  function onUp()        { S.isDrawing = false; }
-  function onTouchDown(e){ e.preventDefault(); const t = e.touches[0]; onDown({ clientX: t.clientX, clientY: t.clientY }); }
-  function onTouchMove(e){ e.preventDefault(); const t = e.touches[0]; onMove({ clientX: t.clientX, clientY: t.clientY }); }
+  function onUp(e) {
+    if (!S.isDrawing) return;
+    S.isDrawing = false;
+
+    if (S.shapeStart) {
+      const { x, y } = e
+        ? getPos(e.clientX, e.clientY)
+        : (S.lastClientX !== undefined ? getPos(S.lastClientX, S.lastClientY) : S.shapeStart);
+
+      clearPreviewCanvas();
+      const { color, size } = drawParams();
+      drawShape(S.ctx, S.tool, S.shapeStart.x, S.shapeStart.y, x, y, color, size, S.filled);
+
+      const typeMap = { line: 'straight', rect: 'rect', ellipse: 'ellipse' };
+      socket.emit('draw', {
+        type: typeMap[S.tool],
+        x0: S.shapeStart.x, y0: S.shapeStart.y, x1: x, y1: y,
+        color, size, filled: S.filled,
+      });
+      S.shapeStart = null;
+    }
+  }
+
+  function onLeave() {
+    // Завершить фигуру по последней известной позиции
+    if (S.isDrawing && S.shapeStart && S.lastClientX !== undefined) {
+      onUp({ clientX: S.lastClientX, clientY: S.lastClientY });
+    } else {
+      S.isDrawing = false;
+    }
+  }
+
+  function onTouchStart(e) {
+    e.preventDefault();
+    const t = e.touches[0];
+    onDown({ clientX: t.clientX, clientY: t.clientY });
+  }
+  function onTouchMove(e) {
+    e.preventDefault();
+    const t = e.touches[0];
+    S.lastClientX = t.clientX; S.lastClientY = t.clientY;
+    onMove({ clientX: t.clientX, clientY: t.clientY });
+  }
+  function onTouchEnd(e) {
+    e.preventDefault();
+    if (S.shapeStart && S.lastClientX !== undefined) {
+      onUp({ clientX: S.lastClientX, clientY: S.lastClientY });
+    } else {
+      onUp(null);
+    }
+  }
 
   function drawParams() {
     return {
@@ -348,6 +427,37 @@ const App = (() => {
     c.fillStyle = color; c.fill();
   }
 
+  /** Универсальная отрисовка фигуры на произвольном ctx */
+  function drawShape(ctx, tool, x0, y0, x1, y1, color, size, filled) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = size;
+    ctx.lineCap     = 'round';
+    ctx.lineJoin    = 'round';
+
+    ctx.beginPath();
+
+    if (tool === 'line') {
+      ctx.moveTo(x0, y0);
+      ctx.lineTo(x1, y1);
+      ctx.stroke();
+    } else if (tool === 'rect') {
+      const rx = Math.min(x0, x1), ry = Math.min(y0, y1);
+      const rw = Math.abs(x1 - x0), rh = Math.abs(y1 - y0);
+      ctx.rect(rx, ry, rw, rh);
+      if (filled) { ctx.fillStyle = color; ctx.fill(); }
+      ctx.stroke();
+    } else if (tool === 'ellipse') {
+      const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      const rx = Math.abs(x1 - x0) / 2, ry = Math.abs(y1 - y0) / 2;
+      ctx.ellipse(cx, cy, Math.max(rx, 1), Math.max(ry, 1), 0, 0, Math.PI * 2);
+      if (filled) { ctx.fillStyle = color; ctx.fill(); }
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
   function fillBackground(color) {
     if (!S.ctx) return;
     S.ctx.fillStyle = color;
@@ -355,11 +465,55 @@ const App = (() => {
     if (S.canvas) S.canvas.dataset.bgColor = color;
   }
 
+  function clearPreviewCanvas() {
+    if (S.previewCtx) {
+      S.previewCtx.clearRect(0, 0, S.previewCanvas.width, S.previewCanvas.height);
+    }
+  }
+
+  // ── Аэрограф ────────────────────────────────────────────────
+  let _lastSprayTime = 0;
+  function doSpray(x, y) {
+    const now = Date.now();
+    if (now - _lastSprayTime < 30) return; // ~33fps макс
+    _lastSprayTime = now;
+
+    const { color } = drawParams();
+    const radius = S.brushSize * 2.5;
+    const count  = 18;
+    const pts    = [];
+
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const r     = Math.random() * radius;
+      const px    = x + Math.cos(angle) * r;
+      const py    = y + Math.sin(angle) * r;
+      drawDot(px, py, color, 2);
+      pts.push({ x: px, y: py });
+    }
+    socket.emit('draw', { type: 'spray', points: pts, color, size: 2 });
+  }
+
+  /** Воспроизведение одного события рисования */
+  function renderDrawEvent(d) {
+    if (!S.ctx) return;
+    switch (d.type) {
+      case 'line':
+        drawLine(d.x0, d.y0, d.x1, d.y1, d.color, d.size); break;
+      case 'dot':
+        drawDot(d.x, d.y, d.color, d.size); break;
+      case 'straight':
+        drawShape(S.ctx, 'line', d.x0, d.y0, d.x1, d.y1, d.color, d.size, false); break;
+      case 'rect':
+      case 'ellipse':
+        drawShape(S.ctx, d.type, d.x0, d.y0, d.x1, d.y1, d.color, d.size, d.filled); break;
+      case 'spray':
+        (d.points || []).forEach(p => drawDot(p.x, p.y, d.color, d.size)); break;
+    }
+  }
+
   function replayHistory(history) {
-    (history || []).forEach(d => {
-      if (d.type === 'line') drawLine(d.x0, d.y0, d.x1, d.y1, d.color, d.size);
-      else if (d.type === 'dot') drawDot(d.x, d.y, d.color, d.size);
-    });
+    (history || []).forEach(d => renderDrawEvent(d));
   }
 
   function clearCanvas() {
@@ -375,102 +529,102 @@ const App = (() => {
   }
 
   // =============================================================
-  //  ТАЙМЕР (клиентский countdown)
+  //  ТАЙМЕР — FIX: считаем через Date.now() без дрейфа
   // =============================================================
   function startClientTimer(remaining, total) {
     stopClientTimer();
-    S.timerTotal = total;
-    S.timerLeft  = remaining;
+    S.timerTotal     = total;
+    S.timerStartAt   = Date.now();
+    S.timerStartLeft = remaining;
+
     document.getElementById('round-bar').classList.remove('hidden');
     updateTimerUI(remaining, total);
 
     S.timerInterval = setInterval(() => {
-      S.timerLeft = Math.max(0, S.timerLeft - 1);
-      updateTimerUI(S.timerLeft, S.timerTotal);
-      if (S.timerLeft <= 0) stopClientTimer();
-    }, 1000);
+      const elapsed = (Date.now() - S.timerStartAt) / 1000;
+      const left    = Math.max(0, S.timerStartLeft - elapsed);
+      updateTimerUI(left, S.timerTotal);
+      if (left <= 0) stopClientTimer();
+    }, 400); // чаще для плавности
   }
 
   function stopClientTimer() {
     clearInterval(S.timerInterval);
     S.timerInterval = null;
+    const bar = document.getElementById('round-bar');
+    if (bar) bar.classList.remove('timer-urgent');
   }
 
   function updateTimerUI(left, total) {
     const arc  = document.getElementById('timer-arc');
     const text = document.getElementById('timer-text');
+    const bar  = document.getElementById('round-bar');
     if (!arc || !text) return;
 
     const pct = total > 0 ? (left / total) : 0;
     arc.style.strokeDashoffset = (1 - pct) * 100;
     text.textContent = Math.ceil(left);
 
-    // Цвет: зелёный → жёлтый → красный
-    if (pct > .5)      arc.style.stroke = '#22c55e';
+    if      (pct > .5) arc.style.stroke = '#22c55e';
     else if (pct > .2) arc.style.stroke = '#f59e0b';
     else               arc.style.stroke = '#ef4444';
+
+    // Пульс при < 10 секунд
+    if (bar) bar.classList.toggle('timer-urgent', left <= 10 && left > 0);
   }
 
   // =============================================================
   //  ОВЕРЛЕИ
   // =============================================================
+  const ALL_OVERLAYS = [
+    'overlay-word-input',
+    'overlay-player-waiting',
+    'overlay-grading-admin',
+    'overlay-grading-player',
+    'overlay-finished',
+  ];
 
-  /** Показать нужный оверлей (null — скрыть все) */
   function showOverlay(name) {
-    const ids = ['overlay-word-input', 'overlay-player-waiting', 'overlay-grading', 'overlay-finished'];
-    ids.forEach(id => document.getElementById(id).classList.add('hidden'));
+    ALL_OVERLAYS.forEach(id => document.getElementById(id).classList.add('hidden'));
     if (name) document.getElementById(name).classList.remove('hidden');
   }
 
   function setRoundInfo(current, total) {
-    // Тулбар
     document.getElementById('ta-round').textContent = `Раунд ${current} / ${total}`;
     document.getElementById('tp-round').textContent = `Раунд ${current} / ${total}`;
   }
 
-  function showHint(hint) {
-    if (!hint) return;
-    const el   = document.getElementById('tp-hint');
-    const text = document.getElementById('tp-hint-text');
-    if (el && text) { text.textContent = hint; el.classList.remove('hidden'); }
+  function showWordBadge(word) {
+    if (!word) return;
+    const el   = document.getElementById('tp-word');
+    const text = document.getElementById('tp-word-text');
+    if (el && text) { text.textContent = word; el.classList.remove('hidden'); }
   }
 
-  /** Показать оверлей оценки */
+  /** Показать оверлей оценки — ОТДЕЛЬНЫЙ для учителя и ученика */
   function showGradingOverlay(roundNum, total, word) {
     S.gameStatus = 'grading';
     stopClientTimer();
     document.getElementById('round-bar').classList.add('hidden');
 
-    // Сбросить кнопки оценки
-    document.querySelectorAll('.grade-btn').forEach(b => b.style.opacity = '1');
-    document.getElementById('grade-given-display').classList.add('hidden');
-
-    // Следующий раунд или финиш
+    const badge  = `Раунд ${roundNum} / ${total}`;
     const isLast = roundNum >= total;
-    const nextBtn = document.getElementById('btn-next-round');
-    nextBtn.textContent = isLast ? '🏁 Завершить игру' : 'Следующий раунд →';
-
-    // Установить бейдж раунда
-    const badge = `Раунд ${roundNum} / ${total}`;
-    document.getElementById('og-badge').textContent  = badge;
-    document.getElementById('ogp-badge').textContent = badge;
-
-    if (word) {
-      document.getElementById('og-word').textContent = word;
-    }
-
-    showOverlay('overlay-grading');
 
     if (S.role === 'admin') {
-      document.getElementById('grading-admin').classList.remove('hidden');
-      document.getElementById('grading-player').classList.add('hidden');
+      document.getElementById('og-badge').textContent   = badge;
+      document.getElementById('og-word').textContent    = word || '—';
+      document.getElementById('btn-next-round').textContent =
+        isLast ? '🏁 Завершить игру' : 'Следующий раунд →';
+      document.querySelectorAll('.grade-btn').forEach(b => { b.style.opacity = '1'; });
+      document.getElementById('grade-given-display').classList.add('hidden');
+      showOverlay('overlay-grading-admin');
     } else {
-      document.getElementById('grading-admin').classList.add('hidden');
-      document.getElementById('grading-player').classList.remove('hidden');
-      // Сбросить состояние ученика
+      // Ученик: ТОЛЬКО ожидание — никаких кнопок оценки
+      document.getElementById('ogp-badge').textContent = badge;
       document.getElementById('ogp-waiting').classList.remove('hidden');
-      document.getElementById('ogp-grade-display').classList.add('hidden');
+      document.getElementById('ogp-result').classList.add('hidden');
       document.getElementById('ogp-word-reveal').classList.add('hidden');
+      showOverlay('overlay-grading-player');
     }
   }
 
@@ -500,14 +654,14 @@ const App = (() => {
   }
 
   // =============================================================
-  //  GRADES TABLE (финальный экран)
+  //  GRADES TABLE
   // =============================================================
   function renderGradesTable(grades) {
     const tbody = document.getElementById('grades-tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
     grades.forEach(g => {
-      const tr = document.createElement('tr');
+      const tr    = document.createElement('tr');
       const stars = g.grade ? '⭐'.repeat(g.grade) : '—';
       tr.innerHTML = `<td>${g.round}</td><td>${g.word}</td><td>${g.grade ? g.grade + ' ' + stars : '—'}</td>`;
       tbody.appendChild(tr);
@@ -518,7 +672,6 @@ const App = (() => {
   //  SOCKET СОБЫТИЯ
   // =============================================================
 
-  // Новый ученик (только учителю)
   socket.on('player-joined', ({ id, name, color, playerCount }) => {
     document.getElementById('player-count').textContent = playerCount;
     document.getElementById('waiting-hint')?.classList.add('hidden');
@@ -531,10 +684,8 @@ const App = (() => {
     const btn = document.getElementById('btn-start');
     if (btn) btn.disabled = false;
 
-    // Обновить счётчик в тулбаре
     const pc = document.getElementById('ta-pcount');
     if (pc) pc.textContent = `${playerCount} уч.`;
-
     toast(`${name} подключился! 🎉`, 'success');
   });
 
@@ -548,98 +699,84 @@ const App = (() => {
     if (playerCount === 0) document.getElementById('btn-start')?.setAttribute('disabled', true);
   });
 
-  // Игра стартовала — все переходят на экран игры
   socket.on('game-started', ({ settings }) => {
     S.totalRounds = settings.totalRounds;
     initGameScreen(settings);
 
     if (S.role === 'admin') {
-      // Показать оверлей ввода слова для раунда 1
       document.getElementById('owi-badge').textContent = `Раунд 1 / ${settings.totalRounds}`;
       showOverlay('overlay-word-input');
       document.getElementById('word-input').focus();
     } else {
-      // Ученик ждёт
       document.getElementById('opw-badge').textContent = `Раунд 1 / ${settings.totalRounds}`;
       showOverlay('overlay-player-waiting');
     }
   });
 
-  // Раунд начался
-  socket.on('round-started', ({ roundNum, totalRounds, duration, word, hint, canvasColor, allowEraser }) => {
-    S.gameStatus  = 'drawing';
-    S.currentRound= roundNum;
-    S.totalRounds = totalRounds;
-    S.word        = word || null;
-    S.hint        = hint || null;
-    S.allowEraser = allowEraser;
+  socket.on('round-started', ({ roundNum, totalRounds, duration, word, secretWord, canvasColor, allowEraser }) => {
+    S.gameStatus   = 'drawing';
+    S.currentRound = roundNum;
+    S.totalRounds  = totalRounds;
+    S.allowEraser  = allowEraser;
 
-    // Автоочистка уже сделана на сервере (drawHistory=[]), но холст тоже чистим
-    // (Сервер сообщит через настройку, клиент просто чистит при старте раунда если autoClean)
-    // Здесь мы доверяем, что если сервер прислал round-started без истории — значит нужно чистить
     fillBackground(canvasColor || '#ffffff');
-
     setRoundInfo(roundNum, totalRounds);
     showOverlay(null);
-
-    // Таймер
     startClientTimer(duration, duration);
 
-    // Кнопка Стоп — только учителю
+    // Вспышка холста при старте
+    const cc = document.getElementById('canvas-container');
+    if (cc) { cc.classList.remove('round-flash'); void cc.offsetWidth; cc.classList.add('round-flash'); }
+
     if (S.role === 'admin') {
       document.getElementById('btn-stop-round').classList.remove('hidden');
       document.getElementById('ta-word').classList.remove('hidden');
-      document.getElementById('ta-word-text').textContent = word || '—';
+      document.getElementById('ta-word-text').textContent = secretWord || '—';
+      if (S.canvas) S.canvas.style.pointerEvents = 'none';
     } else {
-      if (hint) showHint(hint);
+      if (word) showWordBadge(word);
+      else document.getElementById('tp-word').classList.add('hidden');
+      if (S.canvas) S.canvas.style.pointerEvents = 'auto';
     }
-
-    // Разблокировать холст
-    if (S.canvas) S.canvas.style.pointerEvents = S.role === 'player' ? 'auto' : 'none';
   });
 
-  // Раунд завершён
   socket.on('round-ended', ({ roundNum, totalRounds, word }) => {
-    // Заблокировать рисование
     if (S.canvas) S.canvas.style.pointerEvents = 'none';
     if (S.role === 'admin') document.getElementById('btn-stop-round').classList.add('hidden');
-
     showGradingOverlay(roundNum, totalRounds, word);
   });
 
-  // Учитель объявляет следующий раунд (ученики ждут слово)
   socket.on('waiting-for-word', ({ currentRound, totalRounds }) => {
     S.gameStatus = 'waiting_word';
-    document.getElementById('tp-hint').classList.add('hidden');
+    document.getElementById('tp-word').classList.add('hidden');
 
     if (S.role === 'admin') {
-      const nextRound = currentRound + 1;
-      document.getElementById('owi-badge').textContent = `Раунд ${nextRound} / ${totalRounds}`;
+      const next = currentRound + 1;
+      document.getElementById('owi-badge').textContent = `Раунд ${next} / ${totalRounds}`;
       showOverlay('overlay-word-input');
       document.getElementById('word-input').focus();
     } else {
-      const nextRound = currentRound + 1;
-      document.getElementById('opw-badge').textContent = `Раунд ${nextRound} / ${totalRounds}`;
+      const next = currentRound + 1;
+      document.getElementById('opw-badge').textContent = `Раунд ${next} / ${totalRounds}`;
       showOverlay('overlay-player-waiting');
     }
   });
 
-  // Оценка пришла (ученики)
+  // Оценка пришла — показываем ТОЛЬКО ученику
   socket.on('grade-received', ({ grade, roundNum, word }) => {
-    // Показать слово
+    // Раскрыть слово
     const wr = document.getElementById('ogp-word-reveal');
     const wt = document.getElementById('ogp-word');
-    if (wr && wt) { wt.textContent = word; wr.classList.remove('hidden'); }
+    if (wr && wt && word) { wt.textContent = word; wr.classList.remove('hidden'); }
 
-    // Показать оценку
+    // Скрыть "Ждём..." и показать результат
     document.getElementById('ogp-waiting').classList.add('hidden');
-    const gd = document.getElementById('ogp-grade-display');
-    gd.classList.remove('hidden');
+    document.getElementById('ogp-result').classList.remove('hidden');
 
     if (grade !== null) {
       document.getElementById('ogp-stars').textContent    = '⭐'.repeat(grade);
       document.getElementById('ogp-grade-num').textContent = grade;
-      toast(`Оценка: ${grade} ${'⭐'.repeat(grade)}`, 'success');
+      toast(`Оценка: ${grade} ${'⭐'.repeat(grade)} 🎉`, 'success');
     } else {
       document.getElementById('ogp-stars').textContent    = '—';
       document.getElementById('ogp-grade-num').textContent = '';
@@ -647,7 +784,6 @@ const App = (() => {
     }
   });
 
-  // Игра завершена
   socket.on('game-finished', ({ grades }) => {
     S.gameStatus = 'finished';
     stopClientTimer();
@@ -657,40 +793,36 @@ const App = (() => {
   });
 
   // Штрих от другого игрока
-  socket.on('draw', (data) => {
-    if (!S.ctx) return;
-    if (data.type === 'line') drawLine(data.x0, data.y0, data.x1, data.y1, data.color, data.size);
-    else if (data.type === 'dot') drawDot(data.x, data.y, data.color, data.size);
-  });
+  socket.on('draw', (data) => { renderDrawEvent(data); });
 
-  // Курсор другого игрока
   socket.on('cursor-move', ({ id, name, color, x, y }) => {
     if (S.canvas) updateCursor(id, name, color, x, y);
   });
 
-  // Холст очищен
   socket.on('canvas-cleared', ({ canvasColor }) => {
     fillBackground(canvasColor || '#ffffff');
     toast('Холст очищен', 'info');
   });
 
-  // Учитель отключился
   socket.on('admin-disconnected', () => {
     toast('Учитель покинул урок', 'error');
   });
 
   // =============================================================
-  //  TOAST
+  //  TOAST — с анимацией выхода
   // =============================================================
   let toastTimer = null;
   function toast(msg, type = 'info') {
     const el = document.getElementById('toast');
     if (!el) return;
+    el.classList.remove('toast-out');
     el.textContent = msg;
     el.className   = `toast toast-${type}`;
-    el.classList.remove('hidden');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.add('hidden'), 3000);
+    toastTimer = setTimeout(() => {
+      el.classList.add('toast-out');
+      setTimeout(() => el.classList.add('hidden'), 200);
+    }, 3000);
   }
 
   // =============================================================

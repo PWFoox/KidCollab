@@ -1,8 +1,5 @@
 // =============================================================
 //  server.js — DrawTogether v2 (multi-round)
-//
-//  Машина состояний комнаты:
-//  lobby → waiting_word → drawing → grading → waiting_word → ... → finished
 // =============================================================
 
 const express  = require('express');
@@ -17,32 +14,6 @@ const io     = new Server(server, { cors: { origin: '*' } });
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-// =============================================================
-//  СТРУКТУРА КОМНАТЫ
-//  rooms[roomId] = {
-//    adminSocketId   : string
-//    status          : 'lobby'|'waiting_word'|'drawing'|'grading'|'finished'
-//    settings        : Settings
-//    currentRound    : number          (0 до старта)
-//    currentWord     : string
-//    grades          : GradeEntry[]    [{round, word, grade}]
-//    players         : { [sid]: {name, color} }
-//    drawHistory     : DrawEvent[]
-//    roundStartedAt  : number|null     (Date.now() при старте раунда)
-//    roundTimeout    : Timeout|null    (авто-стоп по таймеру)
-//  }
-//
-//  Settings = {
-//    totalRounds  : 1-10           (кол-во раундов)
-//    roundTime    : секунды        (время раунда)
-//    canvasWidth  : px
-//    canvasHeight : px
-//    autoClean    : bool           (чистить холст между раундами)
-//    showHint     : bool           (первая буква слова ученикам)
-//    allowEraser  : bool           (разрешить ластик ученикам)
-//    canvasColor  : hex            (цвет фона холста)
-//  }
-// =============================================================
 const rooms = {};
 
 const PALETTE = [
@@ -63,7 +34,6 @@ function pickColor(room) {
   return PALETTE.find(c => !used.includes(c)) || PALETTE[Math.floor(Math.random() * PALETTE.length)];
 }
 
-/** Завершить текущий раунд — переход в grading */
 function endRound(roomId) {
   const room = rooms[roomId];
   if (!room || room.status !== 'drawing') return;
@@ -74,11 +44,22 @@ function endRound(roomId) {
   io.to(roomId).emit('round-ended', {
     roundNum:    room.currentRound,
     totalRounds: room.settings.totalRounds,
-    word:        room.currentWord,           // чтобы игрок узнал слово после раунда
+    word:        room.currentWord,
   });
-
-  console.log(`[R] Round ${room.currentRound} ended in ${roomId}, word="${room.currentWord}"`);
+  console.log(`[R] Round ${room.currentRound} ended in ${roomId}`);
 }
+
+// Очистка брошенных комнат (старше 4 часов)
+setInterval(() => {
+  const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+  for (const [id, room] of Object.entries(rooms)) {
+    if (room.createdAt < cutoff) {
+      if (room.roundTimeout) clearTimeout(room.roundTimeout);
+      delete rooms[id];
+      console.log(`[R] Room ${id} expired and removed`);
+    }
+  }
+}, 30 * 60 * 1000);
 
 // =============================================================
 //  SOCKET.IO
@@ -86,24 +67,20 @@ function endRound(roomId) {
 io.on('connection', (socket) => {
   console.log(`[+] ${socket.id}`);
 
-  // -----------------------------------------------------------
-  //  ADMIN: create-room
-  //  Payload : { canvasWidth, canvasHeight }
-  //  Callback: { roomId }
-  // -----------------------------------------------------------
+  // ADMIN: create-room
   socket.on('create-room', ({ canvasWidth, canvasHeight } = {}, cb) => {
     const roomId = makeRoomId();
-
     rooms[roomId] = {
       adminSocketId:  socket.id,
       status:         'lobby',
+      createdAt:      Date.now(),
       settings: {
         totalRounds:  3,
         roundTime:    60,
         canvasWidth:  clamp(+canvasWidth  || 900, 400, 1600),
         canvasHeight: clamp(+canvasHeight || 600, 300, 1000),
         autoClean:    true,
-        showHint:     false,
+        showWord:     false,   // показывать слово ученикам целиком
         allowEraser:  true,
         canvasColor:  '#ffffff',
       },
@@ -122,33 +99,24 @@ io.on('connection', (socket) => {
     cb({ roomId });
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: update-settings — можно вызывать несколько раз до старта
-  //  Payload: Partial<Settings>
-  // -----------------------------------------------------------
+  // ADMIN: update-settings
   socket.on('update-settings', (patch) => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
     if (!room || role !== 'admin' || room.status !== 'lobby') return;
 
-    // Валидация и применение
     const s = room.settings;
     if (patch.totalRounds  !== undefined) s.totalRounds  = clamp(+patch.totalRounds, 1, 10);
     if (patch.roundTime    !== undefined) s.roundTime    = clamp(+patch.roundTime, 15, 600);
     if (patch.canvasWidth  !== undefined) s.canvasWidth  = clamp(+patch.canvasWidth, 400, 1600);
     if (patch.canvasHeight !== undefined) s.canvasHeight = clamp(+patch.canvasHeight, 300, 1000);
     if (patch.autoClean    !== undefined) s.autoClean    = !!patch.autoClean;
-    if (patch.showHint     !== undefined) s.showHint     = !!patch.showHint;
+    if (patch.showWord     !== undefined) s.showWord     = !!patch.showWord;
     if (patch.allowEraser  !== undefined) s.allowEraser  = !!patch.allowEraser;
     if (patch.canvasColor  !== undefined) s.canvasColor  = patch.canvasColor;
   });
 
-  // -----------------------------------------------------------
-  //  PLAYER: join-room
-  //  Payload : { roomId, playerName }
-  //  Callback: { status, settings, currentRound, drawHistory,
-  //              color, grades, remaining, hint } | { error }
-  // -----------------------------------------------------------
+  // PLAYER: join-room
   socket.on('join-room', ({ roomId, playerName } = {}, cb) => {
     const room = rooms[roomId];
     if (!room)                         return cb({ error: 'Комната не найдена. Проверь ID.' });
@@ -164,17 +132,14 @@ io.on('connection', (socket) => {
       playerCount: Object.keys(room.players).length,
     });
 
-    // Для опоздавших — сколько секунд осталось в текущем раунде
     let remaining = null;
     if (room.status === 'drawing' && room.roundStartedAt) {
       remaining = Math.max(0, room.settings.roundTime - (Date.now() - room.roundStartedAt) / 1000);
     }
 
-    // Подсказка (только если показывать и слово уже загадано)
-    const hint = makeHint(room);
+    const wordForPlayer = makeWordDisplay(room);
 
     console.log(`[P] ${playerName} joined ${roomId} (status=${room.status})`);
-
     cb({
       status:       room.status,
       settings:     room.settings,
@@ -183,13 +148,11 @@ io.on('connection', (socket) => {
       color,
       grades:       room.grades,
       remaining,
-      hint,
+      word:         wordForPlayer,
     });
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: start-game — перевод в waiting_word, раунды ещё не идут
-  // -----------------------------------------------------------
+  // ADMIN: start-game
   socket.on('start-game', () => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
@@ -204,15 +167,11 @@ io.on('connection', (socket) => {
     console.log(`[G] Game started in ${roomId}`);
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: start-round — учитель вводит слово, начинается раунд
-  //  Payload: { word }
-  // -----------------------------------------------------------
+  // ADMIN: start-round
   socket.on('start-round', ({ word } = {}, cb) => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
-    if (!room || role !== 'admin') return;
-    if (room.status !== 'waiting_word') return;
+    if (!room || role !== 'admin' || room.status !== 'waiting_word') return;
 
     room.currentRound++;
     room.currentWord    = (word || '???').trim();
@@ -221,7 +180,6 @@ io.on('connection', (socket) => {
 
     if (room.settings.autoClean) room.drawHistory = [];
 
-    // Таймер авто-финиша раунда на сервере
     if (room.roundTimeout) clearTimeout(room.roundTimeout);
     room.roundTimeout = setTimeout(() => endRound(roomId), room.settings.roundTime * 1000);
 
@@ -233,21 +191,19 @@ io.on('connection', (socket) => {
       canvasHeight:room.settings.canvasHeight,
       allowEraser: room.settings.allowEraser,
       canvasColor: room.settings.canvasColor,
-      hint:        makeHint(room),
+      word:        makeWordDisplay(room),   // полное слово если showWord, иначе null
     };
 
-    // Игрокам — без слова
+    // Игрокам — без секретного слова
     socket.to(roomId).emit('round-started', roundData);
-    // Учителю — со словом
-    socket.emit('round-started', { ...roundData, word: room.currentWord });
+    // Учителю — со словом всегда
+    socket.emit('round-started', { ...roundData, secretWord: room.currentWord });
 
     if (cb) cb({ ok: true });
-    console.log(`[G] Round ${room.currentRound}/${room.settings.totalRounds} started in ${roomId}, word="${room.currentWord}"`);
+    console.log(`[G] Round ${room.currentRound}/${room.settings.totalRounds} in ${roomId}, word="${room.currentWord}"`);
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: stop-round — досрочная остановка раунда
-  // -----------------------------------------------------------
+  // ADMIN: stop-round
   socket.on('stop-round', () => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
@@ -255,39 +211,30 @@ io.on('connection', (socket) => {
     endRound(roomId);
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: give-grade
-  //  Payload: { grade }   (null = без оценки)
-  // -----------------------------------------------------------
+  // ADMIN: give-grade
   socket.on('give-grade', ({ grade } = {}) => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
     if (!room || role !== 'admin' || room.status !== 'grading') return;
 
     const entry = { round: room.currentRound, word: room.currentWord, grade };
-    // Перезаписать если уже была оценка за этот раунд
     const idx = room.grades.findIndex(g => g.round === room.currentRound);
     if (idx >= 0) room.grades[idx] = entry; else room.grades.push(entry);
 
-    // Уведомить игроков
     socket.to(roomId).emit('grade-received', { grade, roundNum: room.currentRound, word: room.currentWord });
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: next-round — следующий раунд или конец игры
-  // -----------------------------------------------------------
+  // ADMIN: next-round
   socket.on('next-round', () => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
     if (!room || role !== 'admin' || room.status !== 'grading') return;
 
     if (room.currentRound >= room.settings.totalRounds) {
-      // Игра завершена
       room.status = 'finished';
       io.to(roomId).emit('game-finished', { grades: room.grades });
       console.log(`[G] Game finished in ${roomId}`);
     } else {
-      // Следующий раунд — ждём слово
       room.status = 'waiting_word';
       io.to(roomId).emit('waiting-for-word', {
         currentRound: room.currentRound,
@@ -296,9 +243,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // -----------------------------------------------------------
-  //  PLAYER: draw — сохранить в историю и раздать всем
-  // -----------------------------------------------------------
+  // PLAYER: draw
   socket.on('draw', (data) => {
     const { roomId } = socket.data;
     const room = rooms[roomId];
@@ -308,9 +253,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('draw', data);
   });
 
-  // -----------------------------------------------------------
-  //  PLAYER: cursor-move — живые курсоры
-  // -----------------------------------------------------------
+  // PLAYER: cursor-move
   socket.on('cursor-move', ({ x, y }) => {
     const { roomId } = socket.data;
     if (!roomId) return;
@@ -321,9 +264,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('cursor-move', { id: socket.id, name: player.name, color: player.color, x, y });
   });
 
-  // -----------------------------------------------------------
-  //  ADMIN: clear-canvas
-  // -----------------------------------------------------------
+  // ADMIN: clear-canvas
   socket.on('clear-canvas', () => {
     const { roomId, role } = socket.data;
     const room = rooms[roomId];
@@ -332,9 +273,7 @@ io.on('connection', (socket) => {
     io.to(roomId).emit('canvas-cleared', { canvasColor: room.settings.canvasColor });
   });
 
-  // -----------------------------------------------------------
-  //  DISCONNECT
-  // -----------------------------------------------------------
+  // DISCONNECT
   socket.on('disconnect', () => {
     const { roomId, role } = socket.data || {};
     if (!roomId || !rooms[roomId]) return;
@@ -359,9 +298,10 @@ io.on('connection', (socket) => {
 // =============================================================
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
 
-function makeHint(room) {
-  if (!room.settings.showHint || !room.currentWord) return null;
-  return room.currentWord[0] + '_ '.repeat(room.currentWord.length - 1).trim();
+// Если showWord=true → полное слово, иначе null
+function makeWordDisplay(room) {
+  if (!room.settings.showWord || !room.currentWord) return null;
+  return room.currentWord;
 }
 
 // =============================================================
