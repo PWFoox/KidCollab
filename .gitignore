@@ -14,4 +14,10 @@ node_modules/
 # Editors
 .vscode/
 .idea/
+
+# Build artifacts
+dist/
+build/
+*.o
+*.obj
 ```
