@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DrawTogether 🎨</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=Caveat:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ============================================================
+     SCREEN: LANDING
+============================================================ -->
+<div id="screen-landing" class="screen active">
+  <div class="landing-bg">
+    <div class="paint-blob b1"></div>
+    <div class="paint-blob b2"></div>
+    <div class="paint-blob b3"></div>
+  </div>
+  <div class="card landing-card">
+    <div class="logo">
+      <span class="logo-icon">🎨</span>
+      <h1>DrawTogether</h1>
+      <p>Совместное рисование в реальном времени</p>
+    </div>
+    <div class="role-btns">
+      <button class="role-btn role-teacher" onclick="App.goAdminSetup()">
+        <span class="ri">👩‍🏫</span>
+        <strong>Учитель</strong>
+        <small>Создать комнату</small>
+      </button>
+      <button class="role-btn role-student" onclick="App.goJoin()">
+        <span class="ri">🎒</span>
+        <strong>Ученик</strong>
+        <small>Войти по коду</small>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     SCREEN: ADMIN SETUP  (размер холста → создать комнату)
+============================================================ -->
+<div id="screen-admin-setup" class="screen">
+  <div class="card setup-card">
+    <button class="btn-back" onclick="App.showScreen('screen-landing')">← Назад</button>
+    <h2>🏫 Создать комнату</h2>
+    <p class="card-sub">Размер холста можно изменить позже</p>
+
+    <div class="form-group">
+      <label>Размер холста</label>
+      <div class="canvas-presets">
+        <button class="preset-btn active" data-w="900"  data-h="600"  onclick="App.pickPreset(this)">Средний<br/><small>900×600</small></button>
+        <button class="preset-btn"        data-w="1200" data-h="750"  onclick="App.pickPreset(this)">Большой<br/><small>1200×750</small></button>
+        <button class="preset-btn"        data-w="700"  data-h="500"  onclick="App.pickPreset(this)">Маленький<br/><small>700×500</small></button>
+        <button class="preset-btn"        data-w="1400" data-h="900"  onclick="App.pickPreset(this)">Огромный<br/><small>1400×900</small></button>
+      </div>
+    </div>
+
+    <button class="btn btn-primary btn-full" onclick="App.createRoom()">
+      Создать комнату →
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================
+     SCREEN: ADMIN LOBBY
+     Список учеников + настройки игры + кнопка Старт
+============================================================ -->
+<div id="screen-admin-lobby" class="screen">
+  <div class="card lobby-card">
+
+    <!-- Заголовок с кодом комнаты -->
+    <div class="lobby-top">
+      <div class="room-id-block">
+        <span class="rid-label">Код комнаты</span>
+        <span id="display-room-id" class="rid-value">——</span>
+        <button class="btn btn-copy" onclick="App.copyLink()">📋 Ссылка</button>
+      </div>
+    </div>
+
+    <div class="lobby-body">
+
+      <!-- Левая колонка: ученики -->
+      <div class="lobby-col">
+        <div class="col-header">
+          <h3>👥 Ученики</h3>
+          <span id="player-count" class="count-badge">0</span>
+        </div>
+        <ul id="player-list" class="player-list"></ul>
+        <p id="waiting-hint" class="waiting-hint">⏳ Ждём учеников…</p>
+      </div>
+
+      <!-- Правая колонка: настройки игры -->
+      <div class="lobby-col settings-col">
+        <div class="col-header"><h3>⚙️ Настройки</h3></div>
+
+        <!-- Раундов -->
+        <div class="setting-row">
+          <span class="setting-label">🔄 Раундов</span>
+          <div class="number-picker">
+            <button onclick="App.adjustSetting('totalRounds', -1)">−</button>
+            <span id="s-totalRounds">3</span>
+            <button onclick="App.adjustSetting('totalRounds', +1)">+</button>
+          </div>
+        </div>
+
+        <!-- Время раунда -->
+        <div class="setting-row">
+          <span class="setting-label">⏱ Время раунда</span>
+          <select id="s-roundTime" onchange="App.syncSettings()">
+            <option value="20">20 сек</option>
+            <option value="30">30 сек</option>
+            <option value="45">45 сек</option>
+            <option value="60" selected>1 мин</option>
+            <option value="90">1.5 мин</option>
+            <option value="120">2 мин</option>
+            <option value="180">3 мин</option>
+            <option value="300">5 мин</option>
+          </select>
+        </div>
+
+        <!-- Цвет фона холста -->
+        <div class="setting-row">
+          <span class="setting-label">🎨 Фон холста</span>
+          <label class="color-swatch-wrap">
+            <input type="color" id="s-canvasColor" value="#ffffff" onchange="App.syncSettings()" />
+            <span id="canvas-color-preview" class="color-swatch"></span>
+            <span id="canvas-color-hex" class="color-hex">#ffffff</span>
+          </label>
+        </div>
+
+        <!-- Переключатели -->
+        <div class="setting-row">
+          <span class="setting-label">🧹 Очищать между раундами</span>
+          <label class="toggle"><input type="checkbox" id="s-autoClean" checked onchange="App.syncSettings()" /><span class="tslider"></span></label>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">💡 Подсказка (первая буква)</span>
+          <label class="toggle"><input type="checkbox" id="s-showHint" onchange="App.syncSettings()" /><span class="tslider"></span></label>
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">◻ Ластик у учеников</span>
+          <label class="toggle"><input type="checkbox" id="s-allowEraser" checked onchange="App.syncSettings()" /><span class="tslider"></span></label>
+        </div>
+      </div>
+
+    </div><!-- /.lobby-body -->
+
+    <button id="btn-start" class="btn btn-start btn-full" onclick="App.startGame()" disabled>
+      🚀 Начать игру
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================
+     SCREEN: JOIN (ученик)
+============================================================ -->
+<div id="screen-join" class="screen">
+  <div class="card setup-card">
+    <button class="btn-back" onclick="App.showScreen('screen-landing')">← Назад</button>
+    <h2>🎒 Войти в комнату</h2>
+    <p class="card-sub">Введи код от учителя</p>
+
+    <div class="form-group">
+      <label>Код комнаты</label>
+      <input type="text" id="join-room-id" placeholder="A3F9K2"
+             maxlength="6" autocomplete="off" class="code-input" />
+    </div>
+    <div class="form-group">
+      <label>Твоё имя</label>
+      <input type="text" id="join-name" placeholder="Введи своё имя" maxlength="20" />
+    </div>
+    <button class="btn btn-primary btn-full" onclick="App.joinRoom()">Войти →</button>
+  </div>
+</div>
+
+<!-- ============================================================
+     SCREEN: PLAYER LOBBY  (ожидание старта)
+============================================================ -->
+<div id="screen-player-lobby" class="screen">
+  <div class="card waiting-card">
+    <div class="brush-anim">🖌️</div>
+    <h2 id="lobby-greeting">Привет!</h2>
+    <p class="card-sub">Ожидаем учителя…</p>
+    <p class="hint-text">Приготовь руку 🤚</p>
+    <div class="dot-loader"><span></span><span></span><span></span></div>
+  </div>
+</div>
+
+<!-- ============================================================
+     SCREEN: GAME  — холст + оверлеи
+============================================================ -->
+<div id="screen-game" class="screen game-screen">
+
+  <!-- == TOOLBAR УЧИТЕЛЯ == -->
+  <div id="toolbar-admin" class="toolbar t-admin hidden">
+    <div class="tl">
+      <span class="t-brand">🎨 DrawTogether</span>
+      <div id="ta-round"  class="t-pill">Раунд —</div>
+      <div id="ta-word"   class="t-pill t-word hidden">🔤 <strong id="ta-word-text">—</strong></div>
+    </div>
+    <div class="tr">
+      <span id="ta-pcount" class="t-badge">0 учеников</span>
+      <button class="btn t-btn-clear" onclick="App.clearCanvas()">🗑 Очистить</button>
+      <button id="btn-stop-round" class="btn t-btn-stop hidden" onclick="App.stopRound()">⏹ Стоп</button>
+    </div>
+  </div>
+
+  <!-- == TOOLBAR УЧЕНИКА == -->
+  <div id="toolbar-player" class="toolbar t-player hidden">
+    <div class="tl">
+      <div class="tool-grp">
+        <button id="btn-brush"  class="tool-btn active-tool" title="Кисть"  onclick="App.setTool('brush')">🖌️</button>
+        <button id="btn-eraser" class="tool-btn"             title="Ластик" onclick="App.setTool('eraser')">◻</button>
+      </div>
+      <div class="tool-grp">
+        <label class="color-wrap" title="Цвет">
+          <input type="color" id="brush-color" value="#1a1a1a" />
+          <span class="color-label">Цвет</span>
+        </label>
+      </div>
+      <div class="tool-grp size-grp">
+        <span>✏️</span>
+        <input type="range" id="brush-size" min="1" max="50" value="6" />
+        <span id="size-val">6</span>
+      </div>
+      <div id="tp-hint" class="t-hint-badge hidden">💡 <span id="tp-hint-text"></span></div>
+    </div>
+    <div class="tr">
+      <div id="tp-round" class="t-pill">Раунд —</div>
+      <div id="player-badge" class="player-badge">—</div>
+    </div>
+  </div>
+
+  <!-- == ТАЙМЕР + бар раунда (показывается во время рисования) == -->
+  <div id="round-bar" class="round-bar hidden">
+    <div class="timer-wrap">
+      <svg class="timer-svg" viewBox="0 0 36 36">
+        <circle class="timer-bg"  cx="18" cy="18" r="15.9" fill="none" stroke-width="3"/>
+        <circle class="timer-arc" cx="18" cy="18" r="15.9" fill="none" stroke-width="3"
+                stroke-dasharray="100 100" stroke-dashoffset="0"
+                id="timer-arc"
+                transform="rotate(-90 18 18)"/>
+        <text x="18" y="21" id="timer-text" class="timer-text" text-anchor="middle">—</text>
+      </svg>
+    </div>
+  </div>
+
+  <!-- == ХОЛСТ == -->
+  <div id="canvas-wrapper">
+    <div id="canvas-scroll">
+      <div id="canvas-container">
+        <canvas id="main-canvas"></canvas>
+        <div id="cursor-overlay"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== ОВЕРЛЕИ =================== -->
+
+  <!-- Оверлей: учитель вводит слово перед раундом -->
+  <div id="overlay-word-input" class="overlay hidden">
+    <div class="ov-card">
+      <div class="ov-round-badge" id="owi-badge">Раунд 1 / 3</div>
+      <h2>✏️ Введи слово для раунда</h2>
+      <p class="ov-sub">Ученики не увидят это слово</p>
+      <input type="text" id="word-input" class="word-input"
+             placeholder="Что нужно нарисовать?"
+             maxlength="40"
+             onkeydown="if(event.key==='Enter') App.startRound()" />
+      <button class="btn btn-primary btn-full" onclick="App.startRound()">
+        ▶ Начать раунд
+      </button>
+    </div>
+  </div>
+
+  <!-- Оверлей: ученик ждёт начала раунда -->
+  <div id="overlay-player-waiting" class="overlay hidden">
+    <div class="ov-card">
+      <div class="ov-round-badge" id="opw-badge">Раунд 1 / 3</div>
+      <div class="brush-anim">⏳</div>
+      <h2>Ждём учителя…</h2>
+      <p class="ov-sub">Следующий раунд вот-вот начнётся</p>
+      <div class="dot-loader"><span></span><span></span><span></span></div>
+    </div>
+  </div>
+
+  <!-- Оверлей: оценка (разные секции для учителя / ученика) -->
+  <div id="overlay-grading" class="overlay hidden">
+
+    <!-- Для учителя -->
+    <div id="grading-admin" class="ov-card hidden">
+      <div class="ov-round-badge" id="og-badge">Раунд 1 / 3</div>
+      <h2>⏱ Раунд завершён!</h2>
+      <p class="ov-sub">Слово было: <strong id="og-word" class="word-reveal">—</strong></p>
+
+      <div class="grade-section">
+        <p class="grade-prompt">Поставить оценку:</p>
+        <div class="grade-btns">
+          <button class="grade-btn g5" onclick="App.giveGrade(5)">⭐⭐⭐⭐⭐ <span>Отлично</span></button>
+          <button class="grade-btn g4" onclick="App.giveGrade(4)">⭐⭐⭐⭐ <span>Хорошо</span></button>
+          <button class="grade-btn g3" onclick="App.giveGrade(3)">⭐⭐⭐ <span>Удовл.</span></button>
+          <button class="grade-btn g-skip" onclick="App.giveGrade(null)">— <span>Без оценки</span></button>
+        </div>
+        <div id="grade-given-display" class="grade-given hidden">
+          ✅ Оценка выставлена: <strong id="grade-given-text">—</strong>
+        </div>
+      </div>
+
+      <button id="btn-next-round" class="btn btn-primary btn-full" onclick="App.nextRound()">
+        Следующий раунд →
+      </button>
+    </div>
+
+    <!-- Для ученика -->
+    <div id="grading-player" class="ov-card hidden">
+      <div class="ov-round-badge" id="ogp-badge">Раунд 1 / 3</div>
+      <h2>✋ Карандаши на стол!</h2>
+      <p id="ogp-word-reveal" class="ov-sub hidden">Загадано было: <strong id="ogp-word" class="word-reveal">—</strong></p>
+      <div id="ogp-waiting">
+        <p class="ov-sub">Ждём оценку учителя…</p>
+        <div class="dot-loader"><span></span><span></span><span></span></div>
+      </div>
+      <div id="ogp-grade-display" class="grade-reveal hidden">
+        <div class="grade-stars-big" id="ogp-stars">⭐⭐⭐⭐⭐</div>
+        <div class="grade-number" id="ogp-grade-num">5</div>
+      </div>
+    </div>
+
+  </div><!-- /#overlay-grading -->
+
+  <!-- Оверлей: конец игры -->
+  <div id="overlay-finished" class="overlay hidden">
+    <div class="ov-card ov-card-wide">
+      <h2>🏆 Игра завершена!</h2>
+      <p class="ov-sub">Все раунды пройдены</p>
+
+      <table class="grades-table" id="grades-table">
+        <thead>
+          <tr><th>#</th><th>Слово</th><th>Оценка</th></tr>
+        </thead>
+        <tbody id="grades-tbody"></tbody>
+      </table>
+
+      <div class="finished-actions">
+        <button class="btn btn-primary"   onclick="App.saveCanvas()">💾 Сохранить рисунок</button>
+        <button class="btn btn-secondary" onclick="App.showScreen('screen-landing')">🏠 На главную</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#screen-game -->
+
+<!-- Toast -->
+<div id="toast" class="toast hidden"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
