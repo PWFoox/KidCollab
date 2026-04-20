@@ -12,8 +12,10 @@ const App = (() => {
   const S = {
     role:         null,
     roomId:       null,
+    myId:         null,        // socket.id игрока
     myName:       null,
     myColor:      null,
+    myTeam:       null,        // 'A' или 'B' для team режима
     gameStatus:   null,
     currentRound: 0,
     totalRounds:  3,
@@ -213,10 +215,12 @@ const App = (() => {
       S.roomId      = roomId;
       S.role        = 'player';
       S.myColor     = res.color;
+      S.myTeam      = res.team || null;
       S.brushColor  = res.color;
       S.grades      = res.grades || [];
       S.allowEraser = res.settings?.allowEraser ?? true;
       S.totalRounds = res.settings?.totalRounds ?? 3;
+      S.settings.gameMode = res.settings?.gameMode || 'classic';
 
       if (res.status === 'drawing') {
         initGameScreen(res.settings);
@@ -225,6 +229,7 @@ const App = (() => {
         startClientTimer(res.remaining ?? res.settings.roundTime, res.settings.roundTime);
         setRoundInfo(res.currentRound, S.totalRounds);
         if (res.word) showWordBadge(res.word);
+        updatePlayerBadge();
       } else if (res.status === 'grading') {
         initGameScreen(res.settings);
         showGradingOverlay(res.currentRound, S.totalRounds, null);
@@ -806,12 +811,12 @@ const App = (() => {
   /** Воспроизведение одного события рисования */
   function renderDrawEvent(d, playerId) {
     if (!S.ctx) return;
-    
-    // Для solo/team режимов — каждый игрок рисует только на своём холсте в classic режиме
-    // В solo/team режимах мы показываем все холсты или только свой (в зависимости от реализации)
-    // Пока для простоты: в classic режиме playerId не используется,
-    // в solo/team — рисуем всё на одном холсте для просмотра
-    
+
+    const gameMode = S.settings.gameMode || 'classic';
+    if (gameMode !== 'classic' && playerId && playerId !== S.myId) {
+      return;
+    }
+
     switch (d.type) {
       case 'line':
         drawLine(d.x0, d.y0, d.x1, d.y1, d.color, d.size); break;
@@ -916,6 +921,21 @@ const App = (() => {
     const el   = document.getElementById('tp-word');
     const text = document.getElementById('tp-word-text');
     if (el && text) { text.textContent = word; el.classList.remove('hidden'); }
+  }
+
+  function updatePlayerBadge() {
+    const badge = document.getElementById('player-badge');
+    if (!badge) return;
+    
+    let text = S.myName;
+    if (S.settings.gameMode === 'team' && S.myTeam) {
+      text += ` (${S.myTeam})`;
+    } else if (S.settings.gameMode === 'solo') {
+      text += ' 🎨';
+    }
+    
+    badge.textContent = text;
+    badge.style.backgroundColor = S.myColor;
   }
 
   /** Показать оверлей оценки — ОТДЕЛЬНЫЙ для учителя и ученика */
