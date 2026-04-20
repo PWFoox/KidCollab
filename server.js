@@ -68,7 +68,7 @@ io.on('connection', (socket) => {
   console.log(`[+] ${socket.id}`);
 
   // ADMIN: create-room
-  socket.on('create-room', ({ canvasWidth, canvasHeight } = {}, cb) => {
+  socket.on('create-room', ({ canvasWidth, canvasHeight, gameMode = 'classic' } = {}, cb) => {
     const roomId = makeRoomId();
     rooms[roomId] = {
       adminSocketId:  socket.id,
@@ -83,19 +83,21 @@ io.on('connection', (socket) => {
         showWord:     false,   // показывать слово ученикам целиком
         allowEraser:  true,
         canvasColor:  '#ffffff',
+        gameMode:     gameMode, // classic | solo | team
       },
       currentRound:   0,
       currentWord:    '',
       grades:         [],
       players:        {},
       drawHistory:    [],
+      canvases:       {},    // Для solo/team режимов: { playerId: [] }
       roundStartedAt: null,
       roundTimeout:   null,
     };
 
     socket.join(roomId);
     socket.data = { roomId, role: 'admin' };
-    console.log(`[R] Created ${roomId}`);
+    console.log(`[R] Created ${roomId} (mode=${gameMode})`);
     cb({ roomId });
   });
 
@@ -123,12 +125,16 @@ io.on('connection', (socket) => {
     if (room.status === 'finished')    return cb({ error: 'Игра уже завершена.' });
 
     const color = pickColor(room);
-    room.players[socket.id] = { name: playerName, color };
+    const team = room.settings.gameMode === 'team' 
+      ? (Object.keys(room.players).length % 2 === 0 ? 'A' : 'B')
+      : null;
+    
+    room.players[socket.id] = { name: playerName, color, team };
     socket.join(roomId);
-    socket.data = { roomId, role: 'player', playerName, color };
+    socket.data = { roomId, role: 'player', playerName, color, team };
 
     io.to(room.adminSocketId).emit('player-joined', {
-      id: socket.id, name: playerName, color,
+      id: socket.id, name: playerName, color, team,
       playerCount: Object.keys(room.players).length,
     });
 
@@ -138,14 +144,22 @@ io.on('connection', (socket) => {
     }
 
     const wordForPlayer = makeWordDisplay(room);
+    
+    // Для solo/team режимов — инициализируем холст игрока
+    let playerCanvasHistory = [];
+    if (room.settings.gameMode !== 'classic') {
+      room.canvases[socket.id] = [];
+      playerCanvasHistory = [];
+    }
 
-    console.log(`[P] ${playerName} joined ${roomId} (status=${room.status})`);
+    console.log(`[P] ${playerName} joined ${roomId} (status=${room.status}, team=${team})`);
     cb({
       status:       room.status,
       settings:     room.settings,
       currentRound: room.currentRound,
-      drawHistory:  room.status === 'drawing' ? room.drawHistory : [],
+      drawHistory:  room.status === 'drawing' ? (room.settings.gameMode === 'classic' ? room.drawHistory : playerCanvasHistory) : [],
       color,
+      team,
       grades:       room.grades,
       remaining,
       word:         wordForPlayer,
@@ -261,17 +275,22 @@ io.on('connection', (socket) => {
     
     drawThrottle[socket.id] = now;
     
+    // Для solo/team режимов — сохраняем в личный холст
+    const targetHistory = room.settings.gameMode !== 'classic' 
+      ? (room.canvases[socket.id] || [])
+      : room.drawHistory;
+    
     // Отправка буферизированных данных
     if (room.drawBuffer && room.drawBuffer.length > 0) {
       const batch = room.drawBuffer.splice(0, 10);
       batch.forEach(d => {
-        if (room.drawHistory.length < 20000) room.drawHistory.push(d);
+        if (targetHistory.length < 20000) targetHistory.push(d);
       });
-      socket.to(roomId).emit('draw-batch', batch);
+      socket.to(roomId).emit('draw-batch', { playerId: socket.id, batch });
     }
     
-    if (room.drawHistory.length < 20000) room.drawHistory.push(data);
-    socket.to(roomId).emit('draw', data);
+    if (targetHistory.length < 20000) targetHistory.push(data);
+    socket.to(roomId).emit('draw', { playerId: socket.id, ...data });
   });
 
   // PLAYER: cursor-move — OPTIMIZED: throttle 50ms + only when changed significantly

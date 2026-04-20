@@ -48,6 +48,29 @@
     <button class="btn-back" onclick="App.showScreen('screen-landing')">← Назад</button>
     <h2>🏫 Создать комнату</h2>
     <p class="card-sub">Размер холста можно изменить позже</p>
+    
+    <!-- Выбор режима игры -->
+    <div class="form-group">
+      <label>Режим игры</label>
+      <div class="mode-presets">
+        <button class="mode-btn active" data-mode="classic" onclick="App.pickMode(this)">
+          <span class="mode-icon">🎨</span>
+          <strong>Классический</strong>
+          <small>Один общий холст</small>
+        </button>
+        <button class="mode-btn" data-mode="solo" onclick="App.pickMode(this)">
+          <span class="mode-icon">🖼️</span>
+          <strong>Соревнование</strong>
+          <small>У каждого свой холст</small>
+        </button>
+        <button class="mode-btn" data-mode="team" onclick="App.pickMode(this)">
+          <span class="mode-icon">👥</span>
+          <strong>Командный</strong>
+          <small>Две команды, два холста</small>
+        </button>
+      </div>
+    </div>
+    
     <div class="form-group">
       <label>Размер холста</label>
       <div class="canvas-presets">
