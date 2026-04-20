@@ -1,4 +1,3 @@
-```gitignore
 # Dependencies
 node_modules/
 
@@ -157,4 +156,3 @@ __pycache__/
 *.pyÿ
 *.js.map
 *.css.map
-```
