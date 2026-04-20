@@ -243,17 +243,40 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PLAYER: draw
+  // PLAYER: draw — OPTIMIZED: throttle 16ms (~60fps)
+  const drawThrottle = {};
   socket.on('draw', (data) => {
     const { roomId } = socket.data;
     const room = rooms[roomId];
     if (!room || room.status !== 'drawing') return;
 
+    const now = Date.now();
+    const lastDraw = drawThrottle[socket.id] || 0;
+    if (now - lastDraw < 16) {
+      // Буферизация для отправки позже
+      if (!room.drawBuffer) room.drawBuffer = [];
+      room.drawBuffer.push(data);
+      return;
+    }
+    
+    drawThrottle[socket.id] = now;
+    
+    // Отправка буферизированных данных
+    if (room.drawBuffer && room.drawBuffer.length > 0) {
+      const batch = room.drawBuffer.splice(0, 10);
+      batch.forEach(d => {
+        if (room.drawHistory.length < 20000) room.drawHistory.push(d);
+      });
+      socket.to(roomId).emit('draw-batch', batch);
+    }
+    
     if (room.drawHistory.length < 20000) room.drawHistory.push(data);
     socket.to(roomId).emit('draw', data);
   });
 
-  // PLAYER: cursor-move
+  // PLAYER: cursor-move — OPTIMIZED: throttle 50ms + only when changed significantly
+  let lastCursorEmit = 0;
+  let lastCursorPos = { x: 0, y: 0 };
   socket.on('cursor-move', ({ x, y }) => {
     const { roomId } = socket.data;
     if (!roomId) return;
@@ -261,6 +284,16 @@ io.on('connection', (socket) => {
     if (!room) return;
     const player = room.players[socket.id];
     if (!player) return;
+    
+    const now = Date.now();
+    const dx = x - lastCursorPos.x;
+    const dy = y - lastCursorPos.y;
+    
+    // Отправляем только если прошло 50мс ИЛИ курсор сместился значительно
+    if (now - lastCursorEmit < 50 && Math.sqrt(dx*dx + dy*dy) < 5) return;
+    
+    lastCursorEmit = now;
+    lastCursorPos = { x, y };
     socket.to(roomId).emit('cursor-move', { id: socket.id, name: player.name, color: player.color, x, y });
   });
 
@@ -281,6 +314,8 @@ io.on('connection', (socket) => {
 
     if (role === 'player') {
       delete room.players[socket.id];
+      // Очистка буфера при отключении
+      if (room.drawBuffer) room.drawBuffer = room.drawBuffer.filter(d => true);
       const playerCount = Object.keys(room.players).length;
       io.to(room.adminSocketId).emit('player-left', { id: socket.id, playerCount });
     } else if (role === 'admin') {
