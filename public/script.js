@@ -53,6 +53,7 @@ const App = (() => {
       canvasColor: '#ffffff',
       canvasWidth: 900,
       canvasHeight:600,
+      gameMode:    'classic', // classic | solo | team
     },
 
     // FIX: флаг против повторного навешивания слушателей
@@ -106,12 +107,22 @@ const App = (() => {
   }
 
   // =============================================================
+  //  ADMIN: выбор режима игры
+  // =============================================================
+  function pickMode(btn) {
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    S.settings.gameMode = btn.dataset.mode;
+  }
+
+  // =============================================================
   //  ADMIN: создать комнату
   // =============================================================
   function createRoom() {
     socket.emit('create-room', {
       canvasWidth:  S.settings.canvasWidth,
       canvasHeight: S.settings.canvasHeight,
+      gameMode:     S.settings.gameMode,
     }, (res) => {
       if (res.error) { toast(res.error, 'error'); return; }
       S.roomId = res.roomId;
@@ -793,8 +804,14 @@ const App = (() => {
   }
 
   /** Воспроизведение одного события рисования */
-  function renderDrawEvent(d) {
+  function renderDrawEvent(d, playerId) {
     if (!S.ctx) return;
+    
+    // Для solo/team режимов — каждый игрок рисует только на своём холсте в classic режиме
+    // В solo/team режимах мы показываем все холсты или только свой (в зависимости от реализации)
+    // Пока для простоты: в classic режиме playerId не используется,
+    // в solo/team — рисуем всё на одном холсте для просмотра
+    
     switch (d.type) {
       case 'line':
         drawLine(d.x0, d.y0, d.x1, d.y1, d.color, d.size); break;
@@ -1093,12 +1110,30 @@ const App = (() => {
   });
 
   // Штрих от другого игрока — OPTIMIZED: batch processing
-  socket.on('draw', (data) => { renderDrawEvent(data); });
+  socket.on('draw', (data) => { 
+    // Для solo/team режимов — данные могут быть в формате { playerId, ...data }
+    if (data.playerId) {
+      renderDrawEvent(data, data.playerId);
+    } else {
+      renderDrawEvent(data);
+    }
+  });
   
   // Обработка пакетной отрисовки
-  socket.on('draw-batch', (batch) => {
-    if (!S.ctx || !Array.isArray(batch)) return;
-    batch.forEach(d => renderDrawEvent(d));
+  socket.on('draw-batch', (payload) => {
+    if (!S.ctx) return;
+    
+    // Поддержка нового формата с playerId для solo/team
+    let batch = payload;
+    let playerId = null;
+    
+    if (payload && typeof payload === 'object' && Array.isArray(payload.batch)) {
+      batch = payload.batch;
+      playerId = payload.playerId;
+    }
+    
+    if (!Array.isArray(batch)) return;
+    batch.forEach(d => renderDrawEvent(d, playerId));
   });
 
   socket.on('cursor-move', ({ id, name, color, x, y }) => {
@@ -1136,7 +1171,7 @@ const App = (() => {
   // =============================================================
   return {
     showScreen, goAdminSetup, goJoin,
-    pickPreset, createRoom, copyLink,
+    pickPreset, pickMode, createRoom, copyLink,
     syncSettings, adjustSetting,
     startGame, startRound, stopRound,
     giveGrade, nextRound,
