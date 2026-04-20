@@ -62,7 +62,21 @@ const App = (() => {
   const cursors = {};
 
   // Инструменты в порядке добавления в тулбар
-  const TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'spray'];
+  const TOOLS = ['brush', 'eraser', 'line', 'rect', 'ellipse', 'spray', 'bezier', 'pan'];
+  
+  // Состояние масштабирования и панорамирования
+  let zoom = 1;
+  let panX = 0;
+  let panY = 0;
+  let isPanning = false;
+  let panStart = { x: 0, y: 0 };
+  
+  // Кривые Безье
+  let bezierPoints = [];
+  let isDrawingBezier = false;
+  
+  // Мини-карта
+  let minimapEnabled = false;
 
   // =============================================================
   //  НАВИГАЦИЯ
@@ -282,12 +296,23 @@ const App = (() => {
     if (shapeOpts) shapeOpts.classList.toggle('hidden', tool !== 'rect' && tool !== 'ellipse');
 
     // Курсор
-    const cursor = tool === 'eraser' ? 'cell' : 'crosshair';
+    let cursor = 'crosshair';
+    if (tool === 'eraser') cursor = 'cell';
+    else if (tool === 'pan') cursor = isPanning ? 'grabbing' : 'grab';
+    else if (tool === 'bezier') cursor = 'crosshair';
+    
     if (S.canvas) S.canvas.style.cursor = cursor;
 
     // Сбросить незавершённую фигуру при смене инструмента
     S.shapeStart = null;
     clearPreviewCanvas();
+    
+    // Сброс кривой Безье при смене инструмента
+    if (tool !== 'bezier') {
+      bezierPoints = [];
+      isDrawingBezier = false;
+      clearPreviewCanvas();
+    }
   }
 
   // =============================================================
@@ -312,8 +337,17 @@ const App = (() => {
   function getPos(cx, cy) {
     const r = S.canvas.getBoundingClientRect();
     return {
-      x: (cx - r.left) * (S.canvas.width  / r.width),
-      y: (cy - r.top)  * (S.canvas.height / r.height),
+      x: (cx - r.left - panX) * (S.canvas.width  / r.width) / zoom,
+      y: (cy - r.top  - panY) * (S.canvas.height / r.height) / zoom,
+    };
+  }
+  
+  // Преобразование координат экрана в координаты канваса с учётом зума и пана
+  function getScreenPos(cx, cy) {
+    const r = S.canvas.getBoundingClientRect();
+    return {
+      x: (cx - r.left - panX) / zoom,
+      y: (cy - r.top - panY) / zoom,
     };
   }
   
@@ -354,6 +388,15 @@ const App = (() => {
     if (S.gameStatus !== 'drawing') return;
     const { x, y } = getPos(e.clientX, e.clientY);
     S.lastClientX = e.clientX; S.lastClientY = e.clientY;
+    
+    // Обработка панорамирования
+    if (S.tool === 'pan') {
+      isPanning = true;
+      panStart = { x: e.clientX - panX, y: e.clientY - panY };
+      S.canvas.style.cursor = 'grabbing';
+      return;
+    }
+    
     S.isDrawing = true;
 
     if (S.tool === 'brush' || S.tool === 'eraser') {
@@ -363,6 +406,19 @@ const App = (() => {
       emitDraw({ type: 'dot', x, y, color, size });
     } else if (S.tool === 'spray') {
       doSpray(x, y);
+    } else if (S.tool === 'bezier') {
+      // Кривая Безье: добавляем контрольную точку
+      bezierPoints.push({ x, y });
+      isDrawingBezier = true;
+      
+      // Рисуем точку на превью
+      const { color, size } = drawParams();
+      drawDot(S.previewCtx, x, y, color, size);
+      
+      // Если уже 2 точки, рисуем кривую
+      if (bezierPoints.length >= 2) {
+        drawBezierPreview();
+      }
     } else {
       // line / rect / ellipse — начало фигуры
       S.shapeStart = { x, y };
@@ -372,6 +428,15 @@ const App = (() => {
   function onMove(e) {
     const { x, y } = getPos(e.clientX, e.clientY);
     S.lastClientX = e.clientX; S.lastClientY = e.clientY;
+    
+    // Обработка панорамирования
+    if (isPanning && S.tool === 'pan') {
+      panX = e.clientX - panStart.x;
+      panY = e.clientY - panStart.y;
+      updateCanvasTransform();
+      return;
+    }
+    
     emitCursorMove(x, y);
     if (!S.isDrawing || S.gameStatus !== 'drawing') return;
 
@@ -387,10 +452,20 @@ const App = (() => {
       clearPreviewCanvas();
       const { color, size } = drawParams();
       drawShape(S.previewCtx, S.tool, S.shapeStart.x, S.shapeStart.y, x, y, color, size, S.filled);
+    } else if (S.tool === 'bezier' && isDrawingBezier && bezierPoints.length >= 2) {
+      // Обновляем превью кривой Безье при движении с зажатой кнопкой
+      drawBezierPreview();
     }
   }
 
   function onUp(e) {
+    // Завершение панорамирования
+    if (isPanning && S.tool === 'pan') {
+      isPanning = false;
+      S.canvas.style.cursor = 'grab';
+      return;
+    }
+    
     if (!S.isDrawing) return;
     S.isDrawing = false;
 
@@ -410,6 +485,21 @@ const App = (() => {
         color, size, filled: S.filled,
       });
       S.shapeStart = null;
+    } else if (S.tool === 'bezier' && bezierPoints.length >= 2) {
+      // Завершение кривой Безье - отправляем все точки
+      clearPreviewCanvas();
+      const { color, size } = drawParams();
+      drawBezierCurve(S.ctx, bezierPoints, color, size);
+      
+      emitDraw({
+        type: 'bezier',
+        points: bezierPoints,
+        color,
+        size,
+      });
+      
+      bezierPoints = [];
+      isDrawingBezier = false;
     }
   }
 
@@ -417,6 +507,9 @@ const App = (() => {
     // Завершить фигуру по последней известной позиции
     if (S.isDrawing && S.shapeStart && S.lastClientX !== undefined) {
       onUp({ clientX: S.lastClientX, clientY: S.lastClientY });
+    } else if (isPanning) {
+      isPanning = false;
+      S.canvas.style.cursor = 'grab';
     } else {
       S.isDrawing = false;
     }
@@ -460,10 +553,71 @@ const App = (() => {
     c.stroke();
   }
 
-  function drawDot(x, y, color, size) {
-    const c = S.ctx;
+  function drawDot(ctxOrX, y, color, size) {
+    // Поддержка перегрузки: drawDot(ctx, x, y, color, size) и drawDot(x, y, color, size)
+    let c, x;
+    if (arguments.length === 5) {
+      c = ctxOrX;
+      x = y;
+    } else {
+      c = S.ctx;
+      x = ctxOrX;
+    }
     c.beginPath(); c.arc(x, y, size / 2, 0, Math.PI * 2);
     c.fillStyle = color; c.fill();
+  }
+
+  /** Отрисовка кривой Безье по массиву точек */
+  function drawBezierCurve(ctx, points, color, size) {
+    if (points.length < 2) return;
+    
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = size;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    
+    // Если только 2 точки - рисуем прямую
+    if (points.length === 2) {
+      ctx.moveTo(points[0].x, points[0].y);
+      ctx.lineTo(points[1].x, points[1].y);
+    } else {
+      // Используем квадратичные кривые Безье для плавности
+      ctx.moveTo(points[0].x, points[0].y);
+      
+      for (let i = 1; i < points.length - 1; i++) {
+        const p0 = points[i - 1];
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        
+        // Средняя точка между p0 и p1
+        const midX1 = (p0.x + p1.x) / 2;
+        const midY1 = (p0.y + p1.y) / 2;
+        
+        // Средняя точка между p1 и p2
+        const midX2 = (p1.x + p2.x) / 2;
+        const midY2 = (p1.y + p2.y) / 2;
+        
+        // Квадратичная кривая от midX1 до midX2 с контрольной точкой p1
+        ctx.quadraticCurveTo(p1.x, p1.y, midX2, midY2);
+      }
+      
+      // Последняя прямая до конечной точки
+      const last = points[points.length - 1];
+      ctx.lineTo(last.x, last.y);
+    }
+    
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Превью кривой Безье на preview-canvas */
+  function drawBezierPreview() {
+    if (!S.previewCtx || bezierPoints.length < 2) return;
+    clearPreviewCanvas();
+    const { color, size } = drawParams();
+    drawBezierCurve(S.previewCtx, bezierPoints, color, size);
   }
 
   /** Универсальная отрисовка фигуры на произвольном ctx */
@@ -509,6 +663,111 @@ const App = (() => {
       S.previewCtx.clearRect(0, 0, S.previewCanvas.width, S.previewCanvas.height);
     }
   }
+  
+  // Обновление трансформации канваса (зум + панорамирование)
+  function updateCanvasTransform() {
+    const container = document.getElementById('canvas-container');
+    if (!container) return;
+    container.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+    container.style.transformOrigin = '0 0';
+  }
+  
+  // Функции масштабирования
+  function zoomIn() {
+    zoom = Math.min(3, zoom * 1.2);
+    updateCanvasTransform();
+    updateMinimap();
+  }
+  
+  function zoomOut() {
+    zoom = Math.max(0.5, zoom / 1.2);
+    updateCanvasTransform();
+    updateMinimap();
+  }
+  
+  function resetZoom() {
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+    updateCanvasTransform();
+    updateMinimap();
+  }
+  
+  // Мини-карта
+  function initMinimap() {
+    const minimap = document.getElementById('minimap');
+    if (!minimap) return;
+    
+    minimapEnabled = true;
+    minimap.classList.remove('hidden');
+    
+    // Создаём мини-канвас
+    const miniCanvas = document.createElement('canvas');
+    miniCanvas.id = 'minimap-canvas';
+    miniCanvas.width = 150;
+    miniCanvas.height = 100;
+    minimap.innerHTML = '';
+    minimap.appendChild(miniCanvas);
+    
+    // Добавляем рамку вида
+    const viewport = document.createElement('div');
+    viewport.id = 'minimap-viewport';
+    minimap.appendChild(viewport);
+    
+    updateMinimap();
+  }
+  
+  function updateMinimap() {
+    const minimap = document.getElementById('minimap');
+    const miniCanvas = document.getElementById('minimap-canvas');
+    const viewport = document.getElementById('minimap-viewport');
+    
+    if (!minimap || !miniCanvas || !S.canvas) return;
+    
+    const miniCtx = miniCanvas.getContext('2d');
+    const mainRect = S.canvas.getBoundingClientRect();
+    
+    // Очистка и отрисовка фона
+    miniCtx.fillStyle = '#f0f4ff';
+    miniCtx.fillRect(0, 0, miniCanvas.width, miniCanvas.height);
+    
+    // Масштабирование содержимого основного канваса
+    const scaleX = miniCanvas.width / S.canvas.width;
+    const scaleY = miniCanvas.height / S.canvas.height;
+    const scale = Math.min(scaleX, scaleY);
+    
+    try {
+      miniCtx.drawImage(S.canvas, 0, 0, 
+        S.canvas.width * scale, 
+        S.canvas.height * scale);
+    } catch(e) {}
+    
+    // Рамка видимой области
+    if (viewport && mainRect.width > 0) {
+      const containerRect = document.getElementById('canvas-wrapper').getBoundingClientRect();
+      const viewX = (-panX / mainRect.width) * miniCanvas.width;
+      const viewY = (-panY / mainRect.height) * miniCanvas.height;
+      const viewW = (containerRect.width / mainRect.width) * miniCanvas.width;
+      const viewH = (containerRect.height / mainRect.height) * miniCanvas.height;
+      
+      viewport.style.left = `${Math.max(0, viewX)}px`;
+      viewport.style.top = `${Math.max(0, viewY)}px`;
+      viewport.style.width = `${Math.min(miniCanvas.width - viewX, viewW)}px`;
+      viewport.style.height = `${Math.min(miniCanvas.height - viewY, viewH)}px`;
+    }
+  }
+  
+  function toggleMinimap() {
+    if (minimapEnabled) {
+      const minimap = document.getElementById('minimap');
+      if (minimap) {
+        minimap.classList.add('hidden');
+        minimapEnabled = false;
+      }
+    } else {
+      initMinimap();
+    }
+  }
 
   // ── Аэрограф ────────────────────────────────────────────────
   let _lastSprayTime = 0;
@@ -548,6 +807,8 @@ const App = (() => {
         drawShape(S.ctx, d.type, d.x0, d.y0, d.x1, d.y1, d.color, d.size, d.filled); break;
       case 'spray':
         (d.points || []).forEach(p => drawDot(p.x, p.y, d.color, d.size)); break;
+      case 'bezier':
+        drawBezierCurve(S.ctx, d.points || [], d.color, d.size); break;
     }
   }
 
@@ -881,6 +1142,7 @@ const App = (() => {
     giveGrade, nextRound,
     joinRoom,
     setTool, clearCanvas, saveCanvas,
+    zoomIn, zoomOut, resetZoom, toggleMinimap,
   };
 
 })();

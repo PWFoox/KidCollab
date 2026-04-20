@@ -196,6 +196,8 @@
         <button id="btn-rect"    class="tool-btn"             title="Прямоугольник"  onclick="App.setTool('rect')">▭</button>
         <button id="btn-ellipse" class="tool-btn"             title="Эллипс / круг"  onclick="App.setTool('ellipse')">○</button>
         <button id="btn-spray"   class="tool-btn"             title="Аэрограф"       onclick="App.setTool('spray')">💦</button>
+        <button id="btn-bezier"  class="tool-btn"             title="Кривая Безье"   onclick="App.setTool('bezier')">〰️</button>
+        <button id="btn-pan"     class="tool-btn"             title="Перемещение"    onclick="App.setTool('pan')">✋</button>
       </div>
       <div class="tool-grp">
         <label class="color-wrap" title="Цвет">
@@ -219,6 +221,12 @@
       <div id="tp-word" class="t-word-badge hidden">✏️ <span id="tp-word-text"></span></div>
     </div>
     <div class="tr">
+      <div class="tool-grp zoom-controls">
+        <button class="tool-btn zoom-btn" title="Уменьшить" onclick="App.zoomOut()">➖</button>
+        <button class="tool-btn zoom-btn" title="Сбросить зум" onclick="App.resetZoom()">1:1</button>
+        <button class="tool-btn zoom-btn" title="Увеличить" onclick="App.zoomIn()">➕</button>
+        <button class="tool-btn zoom-btn" title="Мини-карта" onclick="App.toggleMinimap()">🗺️</button>
+      </div>
       <div id="tp-round" class="t-pill">Раунд —</div>
       <div id="player-badge" class="player-badge">—</div>
     </div>
@@ -242,11 +250,13 @@
     <div id="canvas-scroll">
       <div id="canvas-container">
         <canvas id="main-canvas"></canvas>
-        <!-- Превью-холст для фигур (line/rect/ellipse) -->
+        <!-- Превью-холст для фигур (line/rect/ellipse/bezier) -->
         <canvas id="preview-canvas"></canvas>
         <div id="cursor-overlay"></div>
       </div>
     </div>
+    <!-- Мини-карта -->
+    <div id="minimap" class="minimap hidden"></div>
   </div>
 
   <!-- ===== ОВЕРЛЕИ ===== -->
