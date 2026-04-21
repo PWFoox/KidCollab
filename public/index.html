@@ -10,9 +10,7 @@
 </head>
 <body>
 
-<!-- ============================================================
-     SCREEN: LANDING
-============================================================ -->
+<!-- ============================================================  LANDING ============================================================ -->
 <div id="screen-landing" class="screen active">
   <div class="landing-bg">
     <div class="paint-blob b1"></div>
@@ -40,37 +38,13 @@
   </div>
 </div>
 
-<!-- ============================================================
-     SCREEN: ADMIN SETUP
-============================================================ -->
+<!-- ============================================================  ADMIN SETUP ============================================================ -->
 <div id="screen-admin-setup" class="screen">
   <div class="card setup-card">
     <button class="btn-back" onclick="App.showScreen('screen-landing')">← Назад</button>
     <h2>🏫 Создать комнату</h2>
-    <p class="card-sub">Размер холста можно изменить позже</p>
-    
-    <!-- Выбор режима игры -->
-    <div class="form-group">
-      <label>Режим игры</label>
-      <div class="mode-presets">
-        <button class="mode-btn active" data-mode="classic" onclick="App.pickMode(this)">
-          <span class="mode-icon">🎨</span>
-          <strong>Классический</strong>
-          <small>Один общий холст</small>
-        </button>
-        <button class="mode-btn" data-mode="solo" onclick="App.pickMode(this)">
-          <span class="mode-icon">🖼️</span>
-          <strong>Соревнование</strong>
-          <small>У каждого свой холст</small>
-        </button>
-        <button class="mode-btn" data-mode="team" onclick="App.pickMode(this)">
-          <span class="mode-icon">👥</span>
-          <strong>Командный</strong>
-          <small>Две команды, два холста</small>
-        </button>
-      </div>
-    </div>
-    
+    <p class="card-sub">Настрой параметры перед началом</p>
+
     <div class="form-group">
       <label>Размер холста</label>
       <div class="canvas-presets">
@@ -80,15 +54,15 @@
         <button class="preset-btn"        data-w="1400" data-h="900"  onclick="App.pickPreset(this)">Огромный<br/><small>1400×900</small></button>
       </div>
     </div>
+
     <button class="btn btn-primary btn-full" onclick="App.createRoom()">Создать комнату →</button>
   </div>
 </div>
 
-<!-- ============================================================
-     SCREEN: ADMIN LOBBY
-============================================================ -->
+<!-- ============================================================  ADMIN LOBBY ============================================================ -->
 <div id="screen-admin-lobby" class="screen">
   <div class="card lobby-card">
+
     <div class="lobby-top">
       <div class="room-id-block">
         <span class="rid-label">Код комнаты</span>
@@ -96,7 +70,9 @@
         <button class="btn btn-copy" onclick="App.copyLink()">📋 Ссылка</button>
       </div>
     </div>
+
     <div class="lobby-body">
+      <!-- Ученики -->
       <div class="lobby-col">
         <div class="col-header">
           <h3>👥 Ученики</h3>
@@ -105,16 +81,20 @@
         <ul id="player-list" class="player-list"></ul>
         <p id="waiting-hint" class="waiting-hint">⏳ Ждём учеников…</p>
       </div>
+
+      <!-- Настройки -->
       <div class="lobby-col settings-col">
         <div class="col-header"><h3>⚙️ Настройки</h3></div>
+
         <div class="setting-row">
           <span class="setting-label">🔄 Раундов</span>
           <div class="number-picker">
-            <button onclick="App.adjustSetting('totalRounds', -1)">−</button>
+            <button onclick="App.adjustSetting('totalRounds',-1)">−</button>
             <span id="s-totalRounds">3</span>
-            <button onclick="App.adjustSetting('totalRounds', +1)">+</button>
+            <button onclick="App.adjustSetting('totalRounds',+1)">+</button>
           </div>
         </div>
+
         <div class="setting-row">
           <span class="setting-label">⏱ Время раунда</span>
           <select id="s-roundTime" onchange="App.syncSettings()">
@@ -128,6 +108,7 @@
             <option value="300">5 мин</option>
           </select>
         </div>
+
         <div class="setting-row">
           <span class="setting-label">🎨 Фон холста</span>
           <label class="color-swatch-wrap">
@@ -136,30 +117,31 @@
             <span id="canvas-color-hex" class="color-hex">#ffffff</span>
           </label>
         </div>
+
         <div class="setting-row">
           <span class="setting-label">🧹 Очищать между раундами</span>
           <label class="toggle"><input type="checkbox" id="s-autoClean" checked onchange="App.syncSettings()" /><span class="tslider"></span></label>
         </div>
-        <!-- Новая настройка: показывать слово ученикам целиком -->
+
         <div class="setting-row">
           <span class="setting-label">👁 Показывать слово ученикам</span>
           <label class="toggle"><input type="checkbox" id="s-showWord" onchange="App.syncSettings()" /><span class="tslider"></span></label>
         </div>
+
         <div class="setting-row">
           <span class="setting-label">◻ Ластик у учеников</span>
           <label class="toggle"><input type="checkbox" id="s-allowEraser" checked onchange="App.syncSettings()" /><span class="tslider"></span></label>
         </div>
       </div>
     </div>
+
     <button id="btn-start" class="btn btn-start btn-full" onclick="App.startGame()" disabled>
       🚀 Начать игру
     </button>
   </div>
 </div>
 
-<!-- ============================================================
-     SCREEN: JOIN (ученик)
-============================================================ -->
+<!-- ============================================================  JOIN ============================================================ -->
 <div id="screen-join" class="screen">
   <div class="card setup-card">
     <button class="btn-back" onclick="App.showScreen('screen-landing')">← Назад</button>
@@ -167,88 +149,95 @@
     <p class="card-sub">Введи код от учителя</p>
     <div class="form-group">
       <label>Код комнаты</label>
-      <input type="text" id="join-room-id" placeholder="A3F9K2" maxlength="6" autocomplete="off" class="code-input" />
+      <input type="text" id="join-room-id" placeholder="A3F9K2" maxlength="6"
+             autocomplete="off" class="code-input"
+             oninput="this.value=this.value.toUpperCase()" />
     </div>
     <div class="form-group">
       <label>Твоё имя</label>
-      <input type="text" id="join-name" placeholder="Введи своё имя" maxlength="20" />
+      <input type="text" id="join-name" placeholder="Введи своё имя" maxlength="20"
+             onkeydown="if(event.key==='Enter') App.joinRoom()" />
     </div>
     <button class="btn btn-primary btn-full" onclick="App.joinRoom()">Войти →</button>
   </div>
 </div>
 
-<!-- ============================================================
-     SCREEN: PLAYER LOBBY
-============================================================ -->
+<!-- ============================================================  PLAYER LOBBY ============================================================ -->
 <div id="screen-player-lobby" class="screen">
   <div class="card waiting-card">
     <div class="brush-anim">🖌️</div>
     <h2 id="lobby-greeting">Привет!</h2>
-    <p class="card-sub">Ожидаем учителя…</p>
-    <p class="hint-text">Приготовь руку 🤚</p>
+    <p class="card-sub">Ожидаем начала игры…</p>
     <div class="dot-loader"><span></span><span></span><span></span></div>
   </div>
 </div>
 
-<!-- ============================================================
-     SCREEN: GAME
-============================================================ -->
+<!-- ============================================================  GAME SCREEN ============================================================ -->
 <div id="screen-game" class="screen game-screen">
 
-  <!-- TOOLBAR УЧИТЕЛЯ -->
+  <!-- TOOLBAR: УЧИТЕЛЬ -->
   <div id="toolbar-admin" class="toolbar t-admin hidden">
     <div class="tl">
       <span class="t-brand">🎨 DrawTogether</span>
-      <div id="ta-round"  class="t-pill">Раунд —</div>
-      <div id="ta-word"   class="t-pill t-word hidden">🔤 <strong id="ta-word-text">—</strong></div>
+      <div id="ta-round" class="t-pill">Раунд —</div>
+      <div id="ta-word" class="t-pill t-word hidden">🔤 <strong id="ta-word-text">—</strong></div>
     </div>
     <div class="tr">
-      <span id="ta-pcount" class="t-badge">0 учеников</span>
+      <span id="ta-pcount" class="t-badge">0 уч.</span>
       <button class="btn t-btn-clear" onclick="App.clearCanvas()">🗑 Очистить</button>
       <button id="btn-stop-round" class="btn t-btn-stop hidden" onclick="App.stopRound()">⏹ Стоп</button>
     </div>
   </div>
 
-  <!-- TOOLBAR УЧЕНИКА -->
+  <!-- TOOLBAR: УЧЕНИК -->
   <div id="toolbar-player" class="toolbar t-player hidden">
     <div class="tl">
-      <div class="tool-grp">
-        <button id="btn-brush"   class="tool-btn active-tool" title="Кисть"          onclick="App.setTool('brush')">🖌️</button>
-        <button id="btn-eraser"  class="tool-btn"             title="Ластик"         onclick="App.setTool('eraser')">⬜</button>
-        <button id="btn-line"    class="tool-btn"             title="Прямая линия"   onclick="App.setTool('line')">╱</button>
-        <button id="btn-rect"    class="tool-btn"             title="Прямоугольник"  onclick="App.setTool('rect')">▭</button>
-        <button id="btn-ellipse" class="tool-btn"             title="Эллипс / круг"  onclick="App.setTool('ellipse')">○</button>
-        <button id="btn-spray"   class="tool-btn"             title="Аэрограф"       onclick="App.setTool('spray')">💦</button>
-        <button id="btn-bezier"  class="tool-btn"             title="Кривая Безье"   onclick="App.setTool('bezier')">〰️</button>
-        <button id="btn-pan"     class="tool-btn"             title="Перемещение"    onclick="App.setTool('pan')">✋</button>
+
+      <!-- Инструменты -->
+      <div class="tool-grp" role="group" aria-label="Инструменты">
+        <button id="btn-brush"   class="tool-btn active-tool" title="Кисть (B)"         onclick="App.setTool('brush')">🖌️</button>
+        <button id="btn-eraser"  class="tool-btn"             title="Ластик (E)"         onclick="App.setTool('eraser')">⬜</button>
+        <button id="btn-fill"    class="tool-btn"             title="Заливка (F)"        onclick="App.setTool('fill')">🪣</button>
+        <button id="btn-line"    class="tool-btn"             title="Линия (L)"          onclick="App.setTool('line')">╱</button>
+        <button id="btn-rect"    class="tool-btn"             title="Прямоугольник (R)"  onclick="App.setTool('rect')">▭</button>
+        <button id="btn-ellipse" class="tool-btn"             title="Эллипс (O)"         onclick="App.setTool('ellipse')">○</button>
+        <button id="btn-spray"   class="tool-btn"             title="Аэрограф (S)"       onclick="App.setTool('spray')">💦</button>
       </div>
+
+      <!-- Цвет -->
       <div class="tool-grp">
-        <label class="color-wrap" title="Цвет">
-          <input type="color" id="brush-color" value="#1a1a1a" />
-          <span class="color-label">Цвет</span>
-        </label>
+        <div class="color-pick-wrap">
+          <input type="color" id="brush-color" value="#1a1a1a" title="Цвет" />
+          <div id="color-recent" class="color-recent"></div>
+        </div>
       </div>
+
+      <!-- Размер -->
       <div class="tool-grp size-grp">
-        <span>✏️</span>
-        <input type="range" id="brush-size" min="1" max="50" value="6" />
+        <span class="size-icon">✏️</span>
+        <input type="range" id="brush-size" min="1" max="60" value="6" />
         <span id="size-val">6</span>
       </div>
-      <!-- Опция заливки (показывается только для rect/ellipse) -->
+
+      <!-- Заливка (только для rect/ellipse) -->
       <div id="shape-options" class="tool-grp shape-options hidden">
         <label class="fill-label">
           <input type="checkbox" id="shape-filled" />
-          <span class="fill-text">Заливка</span>
+          <span>Заливка</span>
         </label>
       </div>
-      <!-- Слово (если учитель разрешил показывать) -->
+
+      <!-- Слово (если showWord включён) -->
       <div id="tp-word" class="t-word-badge hidden">✏️ <span id="tp-word-text"></span></div>
     </div>
+
     <div class="tr">
-      <div class="tool-grp zoom-controls">
-        <button class="tool-btn zoom-btn" title="Уменьшить" onclick="App.zoomOut()">➖</button>
-        <button class="tool-btn zoom-btn" title="Сбросить зум" onclick="App.resetZoom()">1:1</button>
-        <button class="tool-btn zoom-btn" title="Увеличить" onclick="App.zoomIn()">➕</button>
-        <button class="tool-btn zoom-btn" title="Мини-карта" onclick="App.toggleMinimap()">🗺️</button>
+      <!-- Зум -->
+      <div class="tool-grp zoom-grp" title="Колёсико = зум, Пробел+перетащить = пан">
+        <button class="tool-btn" title="Уменьшить (−)" onclick="App.zoomBy(0.8)">−</button>
+        <span id="zoom-label" class="zoom-label">100%</span>
+        <button class="tool-btn" title="Увеличить (+)" onclick="App.zoomBy(1.25)">+</button>
+        <button class="tool-btn" title="Сбросить зум" onclick="App.resetZoom()">1:1</button>
       </div>
       <div id="tp-round" class="t-pill">Раунд —</div>
       <div id="player-badge" class="player-badge">—</div>
@@ -257,29 +246,24 @@
 
   <!-- ТАЙМЕР -->
   <div id="round-bar" class="round-bar hidden">
-    <div class="timer-wrap">
-      <svg class="timer-svg" viewBox="0 0 36 36">
-        <circle class="timer-bg"  cx="18" cy="18" r="15.9" fill="none" stroke-width="3"/>
-        <circle class="timer-arc" cx="18" cy="18" r="15.9" fill="none" stroke-width="3"
-                stroke-dasharray="100 100" stroke-dashoffset="0"
-                id="timer-arc" transform="rotate(-90 18 18)"/>
-        <text x="18" y="21" id="timer-text" class="timer-text" text-anchor="middle">—</text>
-      </svg>
-    </div>
+    <svg class="timer-svg" viewBox="0 0 36 36">
+      <circle class="timer-bg"  cx="18" cy="18" r="15.9" fill="none" stroke-width="3"/>
+      <circle class="timer-arc" cx="18" cy="18" r="15.9" fill="none" stroke-width="3"
+              stroke-dasharray="100 100" stroke-dashoffset="0"
+              id="timer-arc" transform="rotate(-90 18 18)"/>
+      <text x="18" y="21" id="timer-text" class="timer-text" text-anchor="middle">—</text>
+    </svg>
   </div>
 
   <!-- ХОЛСТ -->
   <div id="canvas-wrapper">
-    <div id="canvas-scroll">
-      <div id="canvas-container">
-        <canvas id="main-canvas"></canvas>
-        <!-- Превью-холст для фигур (line/rect/ellipse/bezier) -->
-        <canvas id="preview-canvas"></canvas>
-        <div id="cursor-overlay"></div>
-      </div>
+    <div id="canvas-container">
+      <canvas id="main-canvas"></canvas>
+      <canvas id="preview-canvas"></canvas>
+      <div id="cursor-overlay"></div>
     </div>
-    <!-- Мини-карта -->
-    <div id="minimap" class="minimap hidden"></div>
+    <!-- Подсказка по управлению -->
+    <div id="zoom-hint" class="zoom-hint">🖱 Колёсико — зум &nbsp;|&nbsp; Пробел+перетащить — пан</div>
   </div>
 
   <!-- ===== ОВЕРЛЕИ ===== -->
@@ -297,7 +281,7 @@
     </div>
   </div>
 
-  <!-- Ученик ждёт начала раунда -->
+  <!-- Ученик ждёт -->
   <div id="overlay-player-waiting" class="overlay hidden">
     <div class="ov-card">
       <div class="ov-round-badge" id="opw-badge">Раунд 1 / 3</div>
@@ -308,10 +292,7 @@
     </div>
   </div>
 
-  <!--
-    ОЦЕНКА УЧИТЕЛЯ — ОТДЕЛЬНЫЙ ОВЕРЛЕЙ
-    Ученики его вообще не видят (отдельный элемент)
-  -->
+  <!-- Оценка: только учитель -->
   <div id="overlay-grading-admin" class="overlay hidden">
     <div class="ov-card">
       <div class="ov-round-badge" id="og-badge">Раунд 1 / 3</div>
@@ -335,10 +316,7 @@
     </div>
   </div>
 
-  <!--
-    ОЖИДАНИЕ ОЦЕНКИ — ТОЛЬКО УЧЕНИК
-    Никаких кнопок оценки здесь нет
-  -->
+  <!-- Ожидание оценки: только ученик -->
   <div id="overlay-grading-player" class="overlay hidden">
     <div class="ov-card player-wait-card">
       <div class="ov-round-badge" id="ogp-badge">Раунд 1 / 3</div>
@@ -346,14 +324,13 @@
       <h2>Карандаши на стол!</h2>
       <p class="ov-sub">Учитель проверяет работу…</p>
       <div id="ogp-waiting" class="dot-loader"><span></span><span></span><span></span></div>
-      <!-- Показывается после получения оценки -->
       <div id="ogp-result" class="ogp-result hidden">
-        <p id="ogp-word-reveal" class="ov-sub hidden">
+        <p id="ogp-word-reveal" class="ov-sub word-reveal-text hidden">
           Слово было: <strong id="ogp-word" class="word-reveal">—</strong>
         </p>
-        <div id="ogp-grade-display" class="grade-reveal">
-          <div class="grade-stars-big" id="ogp-stars">⭐⭐⭐⭐⭐</div>
-          <div class="grade-number" id="ogp-grade-num">5</div>
+        <div class="grade-reveal">
+          <div class="grade-stars-big" id="ogp-stars">⭐</div>
+          <div class="grade-number" id="ogp-grade-num">—</div>
         </div>
       </div>
     </div>
@@ -362,7 +339,8 @@
   <!-- Конец игры -->
   <div id="overlay-finished" class="overlay hidden">
     <div class="ov-card ov-card-wide">
-      <h2>🏆 Игра завершена!</h2>
+      <div class="confetti-header">🏆</div>
+      <h2>Игра завершена!</h2>
       <p class="ov-sub">Все раунды пройдены</p>
       <table class="grades-table">
         <thead><tr><th>#</th><th>Слово</th><th>Оценка</th></tr></thead>
